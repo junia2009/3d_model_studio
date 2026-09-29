@@ -50,6 +50,7 @@ export class Editor extends EventTarget {
     this._initScene();
     this._initControls();
     this._initPicking();
+    this._initObjectDrag();
 
     this._resizeObserver = new ResizeObserver(() => this._resize());
     this._resizeObserver.observe(container);
@@ -131,9 +132,10 @@ export class Editor extends EventTarget {
     // TransformControls を先に作り、ポインターイベントを OrbitControls より先に受け取らせる。
     // ギズモを掴んだ瞬間に視点操作が無効になり、指でのドラッグで視点が一緒に動かない。
     const transform = new TransformControls(this.camera, this.renderer.domElement);
-    transform.setSize(this.isTouch ? 1.35 : 0.9);
+    transform.setSize(this.isTouch ? 1.15 : 0.9);
     this.transform = transform;
     this.scene.add(transform.getHelper());
+    this._simplifyTranslateGizmo(transform);
 
     this.orbit = new OrbitControls(this.camera, this.renderer.domElement);
     this.orbit.enableDamping = true;
@@ -144,19 +146,159 @@ export class Editor extends EventTarget {
     transform.addEventListener('dragging-changed', (e) => {
       this.orbit.enabled = !e.value;
     });
+
+    // TransformControls はどの指の動きも区別せずに受け取るため、ギズモを掴んでいる最中に
+    // 別の指が触れると 2 本の指の位置を行き来して部品が飛んでしまう。掴んだ指以外は捨てる。
+    let lastPointerDown = null;
+    let gizmoPointer = null;
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
+      this.container.addEventListener(
+        type,
+        (e) => {
+          if (type === 'pointerdown' && !transform.dragging) lastPointerDown = e.pointerId;
+          if (transform.dragging && gizmoPointer !== null && e.pointerId !== gizmoPointer) e.stopPropagation();
+        },
+        true,
+      );
+    }
+
     transform.addEventListener('mouseDown', () => {
+      gizmoPointer = lastPointerDown;
       this._dragMoved = false;
+      const target = transform.object;
+      this._gizmoStart = target ? { position: target.position.clone(), limit: this._dragLimit() } : null;
       if (this.selected.length > 1) this._beginMultiTransform();
     });
     transform.addEventListener('objectChange', () => {
       this._dragMoved = true;
+      // 斜めから矢印や面を掴むと、わずかな指の動きがとても遠くへの移動になるので 1 回の移動量を制限する
+      if (transform.mode === 'translate' && this._gizmoStart) {
+        const { position: start, limit } = this._gizmoStart;
+        const offset = transform.object.position.clone().sub(start);
+        if (offset.length() > limit) transform.object.position.copy(start).add(offset.setLength(limit));
+      }
       if (this.selected.length > 1) this._applyMultiTransform();
       this.dispatchEvent(new Event('transform'));
     });
     transform.addEventListener('mouseUp', () => {
+      gizmoPointer = null;
+      this._gizmoStart = null;
       this._multiStart = null;
       if (this._dragMoved) this.commit();
     });
+  }
+
+  /**
+   * 移動ギズモから「面」の四角と中心の持ち手を取り除き、X / Y / Z の矢印だけにする。
+   * これらは斜めから掴むと遠くへ飛びやすく、指では意図せず掴みがち。
+   * 床と平行な移動は部品そのものを掴んでドラッグすれば行える（_initObjectDrag）。
+   */
+  _simplifyTranslateGizmo(transform) {
+    const gizmo = transform._gizmo;
+    for (const group of [gizmo?.gizmo?.translate, gizmo?.picker?.translate]) {
+      if (!group) continue;
+      for (const handle of [...group.children]) {
+        if (['XYZ', 'XY', 'YZ', 'XZ'].includes(handle.name)) group.remove(handle);
+      }
+    }
+  }
+
+  /** 1 回のドラッグで動かせる距離の上限（今の視点の距離に合わせる） */
+  _dragLimit() {
+    return Math.max(3, this.camera.position.distanceTo(this.orbit.target) * 1.5);
+  }
+
+  /**
+   * 選択中の部品を直接掴んでドラッグすると、床と平行にすべらせて動かせる（移動モードのとき）。
+   * 上下の移動はギズモの緑の矢印で行う。選択していない部品の上でドラッグしたときは視点が回る。
+   */
+  _initObjectDrag() {
+    const el = this.renderer.domElement;
+    const raycaster = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+    const plane = new THREE.Plane();
+    const point = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0);
+    let drag = null;
+
+    const setRay = (e) => {
+      const rect = el.getBoundingClientRect();
+      ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+      raycaster.setFromCamera(ndc, this.camera);
+    };
+
+    // OrbitControls より先に判定して、部品を掴んだときは視点が回らないようにする
+    this.container.addEventListener(
+      'pointerdown',
+      (e) => {
+        if (e.target !== el || drag || this.transform.dragging) return;
+        if (this.transform.mode !== 'translate' || !this.selected.length || e.button > 0) return;
+        setRay(e);
+        // ギズモの上ならギズモに任せる
+        this.transform.pointerHover({ x: ndc.x, y: ndc.y, button: e.button });
+        if (this.transform.axis !== null) return;
+
+        const hit = raycaster
+          .intersectObject(this.modelRoot, true)
+          .find((h) => isStudioObject(h.object) && this._isVisibleInTree(h.object));
+        if (!hit) return;
+        const targets = this._topMostSelected();
+        const grabbed = targets.some((t) => {
+          for (let o = hit.object; o; o = o.parent) if (o === t) return true;
+          return false;
+        });
+        if (!grabbed) return;
+
+        plane.setFromNormalAndCoplanarPoint(up, hit.point);
+        drag = {
+          id: e.pointerId,
+          start: hit.point.clone(),
+          x: e.clientX,
+          y: e.clientY,
+          moved: false,
+          limit: this._dragLimit(),
+          items: targets.map((obj) => ({ obj, world: obj.getWorldPosition(new THREE.Vector3()) })),
+        };
+        this.orbit.enabled = false;
+      },
+      true,
+    );
+
+    el.addEventListener('pointermove', (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      if (!drag.moved) {
+        if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < (e.pointerType === 'mouse' ? 4 : 10)) return;
+        drag.moved = true;
+      }
+      this._dragMoved = true;
+      setRay(e);
+      if (!raycaster.ray.intersectPlane(plane, point)) return;
+      const delta = point.sub(drag.start);
+      delta.y = 0;
+      // 床と平行に近い角度で見ているときに遠くへ飛ばないよう制限する
+      if (delta.length() > drag.limit) delta.setLength(drag.limit);
+      for (const { obj, world } of drag.items) {
+        const p = world.clone().add(delta);
+        if (this.snapEnabled) {
+          p.x = Math.round(p.x / SNAP.translate) * SNAP.translate;
+          p.z = Math.round(p.z / SNAP.translate) * SNAP.translate;
+        }
+        obj.parent.updateMatrixWorld(true);
+        obj.position.copy(obj.parent.worldToLocal(p));
+      }
+      if (this.selected.length > 1) this._placePivot();
+      this.dispatchEvent(new Event('transform'));
+    });
+
+    const end = (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const { moved } = drag;
+      drag = null;
+      this.orbit.enabled = true;
+      if (moved) this.commit();
+    };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
   }
 
   /**
@@ -194,7 +336,8 @@ export class Editor extends EventTarget {
           longPressTimer = null;
           if (multiTouch || active.get(e.pointerId) !== down) return;
           const hit = this._pick({ clientX: down.x, clientY: down.y }, raycaster, pointer);
-          if (!hit) return;
+          // 選択中の部品を押さえているときは、掴んで動かそうとしている途中なので何もしない
+          if (!hit || this.selected.includes(this._topLevel(hit))) return;
           down.longPressed = true;
           navigator.vibrate?.(15);
           this.addToSelection(this._topLevel(hit));
