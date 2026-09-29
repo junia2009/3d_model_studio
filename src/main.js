@@ -1,6 +1,7 @@
 import { Editor } from './editor.js';
 import { initOutliner, initPalette, initProperties } from './ui.js';
 import { sampleScene } from './sample.js';
+import { initPWA } from './pwa.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -199,6 +200,7 @@ if (editor.restoreAutosave()) {
   toast('前回の作業を復元しました');
 }
 updateButtons();
+initPWA();
 
 // デバッグ・自動テスト用
 window.studio = editor;

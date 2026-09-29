@@ -3,13 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="部品を組み合わせて 3D モデルを作れるブラウザスタジオ" />
+    <meta name="theme-color" content="#20232b" />
     <title>3D Model Studio</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧊</text></svg>" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="./icons/icon-192.png" type="image/png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="3D Studio" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
     <header class="toolbar">
-      <div class="brand">🧊 3D Model Studio</div>
+      <div class="brand"><img src="./icons/icon.svg" alt="" width="20" height="20" /> 3D Model Studio</div>
 
       <div class="tool-group" aria-label="ファイル">
         <button data-action="new" title="新規作成">新規</button>
@@ -48,6 +57,11 @@
         <button data-action="ungroup" title="グループ解除 (Ctrl+Shift+G)">解除</button>
         <button data-action="ground" title="床に置く (G)">床に置く</button>
         <button data-action="delete" title="削除 (Delete)" class="danger">削除</button>
+      </div>
+
+      <div class="tool-group pwa-group">
+        <span id="offline-badge" class="offline-badge" hidden title="オフラインでも作業・保存・書き出しはできます">オフライン</span>
+        <button id="install-button" class="install" hidden title="アプリとしてインストール">⬇ インストール</button>
       </div>
     </header>
 
@@ -95,6 +109,11 @@
 
     <input type="file" id="file-input" accept=".json,application/json" hidden />
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="update-banner" class="update-banner" role="alert" hidden>
+      <span>新しいバージョンがあります</span>
+      <button data-update="apply" class="primary">更新する</button>
+      <button data-update="later">あとで</button>
+    </div>
 
     <script type="module" src="./src/main.js"></script>
   </body>

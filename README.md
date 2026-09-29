@@ -31,6 +31,17 @@ npm run preview
 
 公開 URL: `https://<ユーザー名>.github.io/3d_model_studio/`
 
+## PWA（アプリとしてインストール）
+
+GitHub Pages で公開したページは PWA に対応しています。
+
+- **インストール**: Chrome / Edge ではツールバー右端の「⬇ インストール」ボタン（またはアドレスバーのインストールアイコン）から。iPhone / iPad は Safari の共有メニュー →「ホーム画面に追加」。
+- **オフライン**: 一度開けば、ネットがなくても起動・編集・保存・書き出しができます（ツールバーに「オフライン」と表示）。
+- **更新**: 新しい版を公開すると、次に開いたときに「新しいバージョンがあります」と表示され、「更新する」で切り替わります。作業内容は自動保存されているので消えません。
+
+Service Worker（`dist/sw.js`）はビルド時に `vite.config.js` のプラグインが `src/sw.js` をもとに生成し、ビルド成果物すべてを事前キャッシュします。
+そのため `npm run dev` では登録されません。動作確認は `npm run build && npm run preview` で行ってください。
+
 ## できること
 
 | 分類 | 機能 |
@@ -77,7 +88,10 @@ src/primitives.js   部品の定義（形状パラメータとジオメトリ生
 src/serializer.js   シーン ⇔ JSON の変換、マテリアル
 src/history.js      Undo / Redo（スナップショット方式）
 src/sample.js       サンプルモデル（ロボットと木）
+src/pwa.js          Service Worker の登録・更新通知・インストールボタン・オフライン表示
+src/sw.js           Service Worker のテンプレート（ビルド時にキャッシュ一覧を埋め込む）
 src/style.css       スタイル
+public/             マニフェストとアイコン（そのまま dist/ にコピーされる）
 ```
 
 ### 部品を増やすには

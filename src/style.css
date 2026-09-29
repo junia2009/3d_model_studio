@@ -86,9 +86,36 @@ button.danger:hover {
 }
 
 .brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 700;
   font-size: 15px;
   margin-right: 6px;
+}
+
+.pwa-group {
+  margin-left: auto;
+}
+
+.offline-badge {
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: rgb(255 176 32 / 15%);
+  border: 1px solid var(--accent-2);
+  color: var(--accent-2);
+  font-size: 11px;
+}
+
+button.install,
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+[hidden] {
+  display: none !important;
 }
 
 .tool-group {
@@ -555,6 +582,21 @@ input[type='color'] {
 
 .toast.error {
   border-color: var(--danger);
+}
+
+.update-banner {
+  position: fixed;
+  right: 16px;
+  bottom: 36px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #2d3240;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
 }
 
 /* ---------------- 狭い画面 ---------------- */

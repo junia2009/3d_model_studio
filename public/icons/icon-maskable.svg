@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- マスカブル用：背景は全面、絵柄は中央 80% の安全領域に収める -->
+  <rect width="512" height="512" fill="#1e2027"/>
+  <g transform="translate(256 256) scale(0.72) translate(-256 -256)">
+    <g stroke="#1e2027" stroke-width="6" stroke-linejoin="round">
+      <polygon points="236,132 366,207 236,282 106,207" fill="#8fb8ff"/>
+      <polygon points="106,207 236,282 236,432 106,357" fill="#4f8cff"/>
+      <polygon points="236,282 366,207 366,357 236,432" fill="#2f5fcc"/>
+    </g>
+    <circle cx="372" cy="150" r="50" fill="#ffb020"/>
+    <circle cx="356" cy="134" r="14" fill="#ffd88a"/>
+  </g>
+</svg>
