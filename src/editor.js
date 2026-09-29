@@ -1,0 +1,730 @@
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
+import { STLExporter } from 'three/addons/exporters/STLExporter.js';
+
+import { PRIMITIVES, buildGeometry } from './primitives.js';
+import { History } from './history.js';
+import {
+  applyMaterialProps,
+  createGroup,
+  createPrimitive,
+  deserializeObject,
+  disposeObject,
+  isStudioObject,
+  reassignIds,
+  serializeScene,
+  validateSceneData,
+} from './serializer.js';
+
+const AUTOSAVE_KEY = 'three-model-studio:autosave';
+
+export const SNAP = {
+  translate: 0.25,
+  rotate: THREE.MathUtils.degToRad(15),
+  scale: 0.1,
+};
+
+/**
+ * 3D ビューポートとシーン編集操作をまとめたクラス。
+ * UI には EventTarget のイベントで状態変化を通知する。
+ *   - 'selection'    : 選択が変わった
+ *   - 'change'       : シーン構成やプロパティが変わった（アウトライナー・パネル再描画用）
+ *   - 'transform'    : ギズモでドラッグ中（数値表示の更新用）
+ *   - 'history'      : Undo / Redo の可否が変わった
+ *   - 'mode'         : 変形モード・座標系・スナップが変わった
+ */
+export class Editor extends EventTarget {
+  constructor(container) {
+    super();
+    this.container = container;
+    this.selected = [];
+    this.history = new History();
+    this.snapEnabled = false;
+    this._multiStart = null;
+
+    this._initRenderer();
+    this._initScene();
+    this._initControls();
+    this._initPicking();
+
+    this._resizeObserver = new ResizeObserver(() => this._resize());
+    this._resizeObserver.observe(container);
+    this._resize();
+
+    this.renderer.setAnimationLoop(() => this._render());
+  }
+
+  // ---------------------------------------------------------------- 初期化
+
+  _initRenderer() {
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.container.appendChild(renderer.domElement);
+    this.renderer = renderer;
+  }
+
+  _initScene() {
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#1e2027');
+    this.scene = scene;
+
+    this.camera = new THREE.PerspectiveCamera(50, 1, 0.05, 500);
+    this.camera.position.set(4, 3.5, 5);
+
+    // ライト
+    scene.add(new THREE.HemisphereLight('#ffffff', '#445066', 1.4));
+    const sun = new THREE.DirectionalLight('#ffffff', 2.2);
+    sun.position.set(5, 10, 6);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -10;
+    sun.shadow.camera.right = 10;
+    sun.shadow.camera.top = 10;
+    sun.shadow.camera.bottom = -10;
+    sun.shadow.bias = -0.0005;
+    scene.add(sun);
+
+    // 床（グリッドと影受け）
+    this.helpers = new THREE.Group();
+    this.helpers.name = '__helpers';
+    const grid = new THREE.GridHelper(20, 80, '#5a6275', '#343946');
+    grid.material.transparent = true;
+    grid.material.opacity = 0.8;
+    this.helpers.add(grid);
+    const axes = new THREE.AxesHelper(1.2);
+    axes.position.y = 0.001;
+    this.helpers.add(axes);
+    const shadowPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(40, 40),
+      new THREE.ShadowMaterial({ opacity: 0.25 }),
+    );
+    shadowPlane.rotation.x = -Math.PI / 2;
+    shadowPlane.receiveShadow = true;
+    scene.add(shadowPlane);
+    scene.add(this.helpers);
+
+    // ユーザーが作るモデルはすべてここにぶら下げる
+    this.modelRoot = new THREE.Group();
+    this.modelRoot.name = 'Model';
+    scene.add(this.modelRoot);
+
+    // 選択枠
+    this.selectionBoxes = new THREE.Group();
+    scene.add(this.selectionBoxes);
+
+    // 複数選択をまとめて動かすための支点
+    this.pivot = new THREE.Object3D();
+    scene.add(this.pivot);
+  }
+
+  _initControls() {
+    this.orbit = new OrbitControls(this.camera, this.renderer.domElement);
+    this.orbit.enableDamping = true;
+    this.orbit.dampingFactor = 0.12;
+    this.orbit.target.set(0, 0.5, 0);
+    this.orbit.update();
+
+    const transform = new TransformControls(this.camera, this.renderer.domElement);
+    transform.setSize(0.9);
+    this.transform = transform;
+    this.scene.add(transform.getHelper());
+
+    transform.addEventListener('dragging-changed', (e) => {
+      this.orbit.enabled = !e.value;
+    });
+    transform.addEventListener('mouseDown', () => {
+      this._dragMoved = false;
+      if (this.selected.length > 1) this._beginMultiTransform();
+    });
+    transform.addEventListener('objectChange', () => {
+      this._dragMoved = true;
+      if (this.selected.length > 1) this._applyMultiTransform();
+      this.dispatchEvent(new Event('transform'));
+    });
+    transform.addEventListener('mouseUp', () => {
+      this._multiStart = null;
+      if (this._dragMoved) this.commit();
+    });
+  }
+
+  _initPicking() {
+    const el = this.renderer.domElement;
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    let down = null;
+
+    el.addEventListener('pointerdown', (e) => {
+      // TransformControls のリスナーが先に走るので、ギズモ上かどうかは axis で分かる
+      down = { x: e.clientX, y: e.clientY, onGizmo: this.transform.axis !== null };
+    });
+    el.addEventListener('pointerup', (e) => {
+      if (!down || e.button !== 0) return;
+      const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+      const onGizmo = down.onGizmo;
+      down = null;
+      // ドラッグ（視点移動）やギズモ操作のときは選択しない
+      if (moved > 4 || onGizmo || this._dragMoved) {
+        this._dragMoved = false;
+        return;
+      }
+      const hit = this._pick(e, raycaster, pointer);
+      const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+      if (!hit) {
+        if (!additive) this.select([]);
+        return;
+      }
+      // 通常はグループ全体を選ぶ。Alt+クリック（またはダブルクリック）なら中の部品を直接選ぶ
+      const target = e.altKey ? hit : this._topLevel(hit);
+      this.select([target], { toggle: additive });
+    });
+    el.addEventListener('dblclick', (e) => {
+      const hit = this._pick(e, raycaster, pointer);
+      if (hit) this.select([hit]);
+    });
+  }
+
+  _pick(e, raycaster, pointer) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, this.camera);
+    const hits = raycaster.intersectObject(this.modelRoot, true);
+    const hit = hits.find((h) => isStudioObject(h.object) && this._isVisibleInTree(h.object));
+    return hit?.object ?? null;
+  }
+
+  _isVisibleInTree(obj) {
+    for (let o = obj; o && o !== this.modelRoot; o = o.parent) if (!o.visible) return false;
+    return true;
+  }
+
+  _topLevel(obj) {
+    let o = obj;
+    while (o.parent && o.parent !== this.modelRoot) o = o.parent;
+    return o;
+  }
+
+  _resize() {
+    const { clientWidth: w, clientHeight: h } = this.container;
+    if (!w || !h) return;
+    this.renderer.setSize(w, h);
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+  }
+
+  _render() {
+    this.orbit.update();
+    for (const box of this.selectionBoxes.children) box.update();
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  // ---------------------------------------------------------------- 選択
+
+  /**
+   * @param {THREE.Object3D[]} objects
+   * @param {{toggle?: boolean}} options toggle: 既存の選択に追加 / 解除する
+   */
+  select(objects, { toggle = false } = {}) {
+    let next;
+    if (toggle) {
+      next = [...this.selected];
+      for (const o of objects) {
+        const i = next.indexOf(o);
+        if (i >= 0) next.splice(i, 1);
+        else next.push(o);
+      }
+    } else {
+      next = [...new Set(objects)];
+    }
+    this.selected = next.filter((o) => isStudioObject(o));
+    this._refreshSelectionVisuals();
+    this.dispatchEvent(new Event('selection'));
+  }
+
+  selectAll() {
+    this.select(this.modelRoot.children.filter(isStudioObject));
+  }
+
+  get primary() {
+    return this.selected[this.selected.length - 1] ?? null;
+  }
+
+  _refreshSelectionVisuals() {
+    for (const box of [...this.selectionBoxes.children]) {
+      box.geometry.dispose();
+      box.material.dispose();
+      this.selectionBoxes.remove(box);
+    }
+    this.selected.forEach((obj) => {
+      const color = obj === this.primary ? '#ffb020' : '#ffd88a';
+      this.selectionBoxes.add(new THREE.BoxHelper(obj, color));
+    });
+
+    this.transform.detach();
+    if (this.selected.length === 1) {
+      this.transform.attach(this.selected[0]);
+    } else if (this.selected.length > 1) {
+      this._placePivot();
+      this.transform.attach(this.pivot);
+    }
+  }
+
+  _placePivot() {
+    const box = new THREE.Box3();
+    for (const o of this.selected) box.expandByObject(o);
+    box.getCenter(this.pivot.position);
+    this.pivot.rotation.set(0, 0, 0);
+    this.pivot.scale.set(1, 1, 1);
+    this.pivot.updateMatrixWorld(true);
+  }
+
+  _beginMultiTransform() {
+    this.pivot.updateMatrixWorld(true);
+    this._multiStart = {
+      pivotInverse: this.pivot.matrixWorld.clone().invert(),
+      objects: this._topMostSelected().map((o) => {
+        o.updateMatrixWorld(true);
+        return { obj: o, world: o.matrixWorld.clone() };
+      }),
+    };
+  }
+
+  _applyMultiTransform() {
+    if (!this._multiStart) return;
+    this.pivot.updateMatrixWorld(true);
+    const delta = new THREE.Matrix4().multiplyMatrices(this.pivot.matrixWorld, this._multiStart.pivotInverse);
+    const world = new THREE.Matrix4();
+    const parentInverse = new THREE.Matrix4();
+    for (const { obj, world: start } of this._multiStart.objects) {
+      world.multiplyMatrices(delta, start);
+      obj.parent.updateMatrixWorld(true);
+      parentInverse.copy(obj.parent.matrixWorld).invert();
+      world.premultiply(parentInverse);
+      world.decompose(obj.position, obj.quaternion, obj.scale);
+    }
+  }
+
+  /** 選択のうち、他の選択オブジェクトの子孫ではないものだけを返す */
+  _topMostSelected() {
+    const set = new Set(this.selected);
+    return this.selected.filter((o) => {
+      for (let p = o.parent; p; p = p.parent) if (set.has(p)) return false;
+      return true;
+    });
+  }
+
+  findById(id) {
+    let found = null;
+    this.modelRoot.traverse((o) => {
+      if (!found && o.userData.id === id) found = o;
+    });
+    return found;
+  }
+
+  // ---------------------------------------------------------------- 編集操作
+
+  addPrimitive(type) {
+    const count = this._countByType(type) + 1;
+    const mesh = createPrimitive(type, { name: `${PRIMITIVES[type].label} ${count}` });
+    this.modelRoot.add(mesh);
+
+    // 視点の注視点付近の床の上に置く
+    const t = this.orbit.target;
+    const step = SNAP.translate;
+    mesh.position.set(Math.round(t.x / step) * step, 0, Math.round(t.z / step) * step);
+    this._placeOnGround(mesh);
+
+    this.select([mesh]);
+    this.commit();
+    return mesh;
+  }
+
+  _countByType(type) {
+    let n = 0;
+    this.modelRoot.traverse((o) => {
+      if (o.userData.type === type) n += 1;
+    });
+    return n;
+  }
+
+  _placeOnGround(obj) {
+    obj.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(obj);
+    if (box.isEmpty()) return;
+    // ワールド座標で Y を動かし、親のローカル座標に戻す
+    const world = obj.getWorldPosition(new THREE.Vector3());
+    world.y -= box.min.y;
+    obj.parent.worldToLocal(world);
+    obj.position.copy(world);
+  }
+
+  dropToGround() {
+    const targets = this._topMostSelected();
+    if (!targets.length) return;
+    targets.forEach((o) => this._placeOnGround(o));
+    this._refreshSelectionVisuals();
+    this.commit();
+  }
+
+  deleteSelected() {
+    const targets = this._topMostSelected();
+    if (!targets.length) return;
+    this.select([]);
+    for (const o of targets) {
+      o.removeFromParent();
+      disposeObject(o);
+    }
+    this.commit();
+  }
+
+  duplicateSelected({ offset = true } = {}) {
+    const targets = this._topMostSelected();
+    if (!targets.length) return;
+    const copies = targets.map((o) => {
+      const copy = this._cloneObject(o);
+      o.parent.add(copy);
+      if (offset) copy.position.x += SNAP.translate * 2;
+      return copy;
+    });
+    this.select(copies);
+    this.commit();
+  }
+
+  /** ワールドの軸（YZ / XZ / XY 平面）で反転したコピーを作る。左右対称のモデル作りに便利 */
+  mirrorDuplicate(axis = 'x') {
+    const targets = this._topMostSelected();
+    if (!targets.length) return;
+    const s = { x: [-1, 1, 1], y: [1, -1, 1], z: [1, 1, -1] }[axis];
+    const mirror = new THREE.Matrix4().makeScale(...s);
+    const copies = targets.map((o) => {
+      const copy = this._cloneObject(o);
+      o.parent.add(copy);
+      o.updateMatrixWorld(true);
+      const world = o.matrixWorld.clone().premultiply(mirror);
+      world.premultiply(o.parent.matrixWorld.clone().invert());
+      world.decompose(copy.position, copy.quaternion, copy.scale);
+      copy.name = `${o.name} (反転)`;
+      return copy;
+    });
+    this.select(copies);
+    this.commit();
+  }
+
+  _cloneObject(obj) {
+    const copy = obj.clone(true);
+    // clone はジオメトリ・マテリアルを共有するので、編集が波及しないよう複製する
+    copy.traverse((o) => {
+      if (o.isMesh) {
+        o.geometry = o.geometry.clone();
+        o.material = o.material.clone();
+      }
+      if (isStudioObject(o)) o.userData = structuredClone(o.userData);
+    });
+    reassignIds(copy);
+    return copy;
+  }
+
+  groupSelected() {
+    const targets = this._topMostSelected();
+    if (targets.length < 1) return;
+    const parent = targets[0].parent;
+    const group = createGroup(`グループ ${this._countGroups() + 1}`);
+
+    const box = new THREE.Box3();
+    targets.forEach((o) => box.expandByObject(o));
+    const center = box.getCenter(new THREE.Vector3());
+    center.y = box.min.y; // 支点は底面の中心にしておくと床置きしやすい
+    parent.add(group);
+    parent.updateMatrixWorld(true);
+    group.position.copy(parent.worldToLocal(center));
+    group.updateMatrixWorld(true);
+
+    targets.forEach((o) => group.attach(o));
+    this.select([group]);
+    this.commit();
+  }
+
+  _countGroups() {
+    let n = 0;
+    this.modelRoot.traverse((o) => {
+      if (o.userData.kind === 'group') n += 1;
+    });
+    return n;
+  }
+
+  ungroupSelected() {
+    const groups = this._topMostSelected().filter((o) => o.userData.kind === 'group');
+    if (!groups.length) return;
+    const released = [];
+    for (const g of groups) {
+      const parent = g.parent;
+      for (const child of [...g.children]) {
+        parent.attach(child);
+        released.push(child);
+      }
+      g.removeFromParent();
+    }
+    this.select(released);
+    this.commit();
+  }
+
+  /** アウトライナーでのドラッグ＆ドロップによる親子付け替え */
+  reparent(obj, newParent, beforeObj = null) {
+    const parent = newParent ?? this.modelRoot;
+    // 自分自身や子孫の中には入れられない
+    for (let p = parent; p; p = p.parent) if (p === obj) return;
+    parent.attach(obj);
+    if (beforeObj && beforeObj.parent === parent) {
+      const list = parent.children;
+      list.splice(list.indexOf(obj), 1);
+      list.splice(list.indexOf(beforeObj), 0, obj);
+    }
+    this._refreshSelectionVisuals();
+    this.commit();
+  }
+
+  updateTransform(obj, { position, rotation, scale }) {
+    if (position) obj.position.set(...position);
+    if (rotation) obj.rotation.set(...rotation.map((d) => THREE.MathUtils.degToRad(d)));
+    if (scale) obj.scale.set(...scale);
+    if (this.selected.length > 1) this._placePivot();
+    this.dispatchEvent(new Event('transform'));
+  }
+
+  updateParams(mesh, params) {
+    Object.assign(mesh.userData.params, params);
+    mesh.geometry.dispose();
+    mesh.geometry = buildGeometry(mesh.userData.type, mesh.userData.params);
+  }
+
+  /** 選択中のすべての部品（グループの中身も含む）にマテリアル設定を適用 */
+  updateMaterial(props) {
+    for (const mesh of this.selectedMeshes()) applyMaterialProps(mesh.material, props);
+  }
+
+  selectedMeshes() {
+    const meshes = new Set();
+    for (const o of this.selected) {
+      o.traverse((c) => {
+        if (c.isMesh && c.userData.kind === 'primitive') meshes.add(c);
+      });
+    }
+    return [...meshes];
+  }
+
+  setVisible(obj, visible) {
+    obj.visible = visible;
+    this.commit();
+  }
+
+  rename(obj, name) {
+    obj.name = name;
+    this.commit();
+  }
+
+  // ---------------------------------------------------------------- ギズモ設定
+
+  setMode(mode) {
+    this.transform.setMode(mode);
+    this.dispatchEvent(new Event('mode'));
+  }
+
+  toggleSpace() {
+    this.transform.setSpace(this.transform.space === 'local' ? 'world' : 'local');
+    this.dispatchEvent(new Event('mode'));
+  }
+
+  setSnap(enabled) {
+    this.snapEnabled = enabled;
+    this.transform.setTranslationSnap(enabled ? SNAP.translate : null);
+    this.transform.setRotationSnap(enabled ? SNAP.rotate : null);
+    this.transform.setScaleSnap(enabled ? SNAP.scale : null);
+    this.dispatchEvent(new Event('mode'));
+  }
+
+  // ---------------------------------------------------------------- カメラ
+
+  focusSelected() {
+    const targets = this.selected.length ? this.selected : this.modelRoot.children;
+    const box = new THREE.Box3();
+    targets.forEach((o) => box.expandByObject(o));
+    if (box.isEmpty()) box.setFromCenterAndSize(new THREE.Vector3(0, 0.5, 0), new THREE.Vector3(2, 2, 2));
+    const center = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.5);
+    const dist = radius / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2)) * 1.1;
+    const dir = this.camera.position.clone().sub(this.orbit.target).normalize();
+    this.orbit.target.copy(center);
+    this.camera.position.copy(center).addScaledVector(dir, dist);
+  }
+
+  setView(view) {
+    const dirs = {
+      front: [0, 0, 1],
+      back: [0, 0, -1],
+      right: [1, 0, 0],
+      left: [-1, 0, 0],
+      top: [0, 1, 0.0001],
+      iso: [1, 0.8, 1.2],
+    };
+    const dist = this.camera.position.distanceTo(this.orbit.target);
+    const dir = new THREE.Vector3(...dirs[view]).normalize();
+    this.camera.position.copy(this.orbit.target).addScaledVector(dir, dist);
+    this.camera.lookAt(this.orbit.target);
+  }
+
+  setHelpersVisible(visible) {
+    this.helpers.visible = visible;
+  }
+
+  // ---------------------------------------------------------------- 履歴・保存
+
+  snapshot() {
+    return JSON.stringify(serializeScene(this.modelRoot));
+  }
+
+  /** 変更を確定して履歴に積む */
+  commit() {
+    const snap = this.snapshot();
+    if (this.history.push(snap)) this._autosave(snap);
+    this.dispatchEvent(new Event('change'));
+    this.dispatchEvent(new Event('history'));
+  }
+
+  undo() {
+    const snap = this.history.undo();
+    if (snap !== null) this._restore(snap);
+  }
+
+  redo() {
+    const snap = this.history.redo();
+    if (snap !== null) this._restore(snap);
+  }
+
+  _restore(snap) {
+    const selectedIds = this.selected.map((o) => o.userData.id);
+    this._loadObjects(JSON.parse(snap).objects);
+    this.select(selectedIds.map((id) => this.findById(id)).filter(Boolean));
+    this._autosave(snap);
+    this.dispatchEvent(new Event('change'));
+    this.dispatchEvent(new Event('history'));
+  }
+
+  _loadObjects(nodes) {
+    this.transform.detach();
+    for (const o of [...this.modelRoot.children]) {
+      o.removeFromParent();
+      disposeObject(o);
+    }
+    for (const node of nodes) this.modelRoot.add(deserializeObject(node));
+  }
+
+  /** ファイルなどから読み込んだデータでシーンを置き換える（履歴はリセット） */
+  loadScene(data) {
+    validateSceneData(data);
+    this.select([]);
+    this._loadObjects(data.objects);
+    const snap = this.snapshot();
+    this.history.reset(snap);
+    this._autosave(snap);
+    this.dispatchEvent(new Event('change'));
+    this.dispatchEvent(new Event('history'));
+  }
+
+  newScene() {
+    this.loadScene(serializeScene(new THREE.Group()));
+  }
+
+  getSceneData() {
+    return serializeScene(this.modelRoot);
+  }
+
+  restoreAutosave() {
+    try {
+      const raw = localStorage.getItem(AUTOSAVE_KEY);
+      if (raw) {
+        this.loadScene(JSON.parse(raw));
+        return this.modelRoot.children.length > 0;
+      }
+    } catch (err) {
+      console.warn('自動保存の復元に失敗しました', err);
+    }
+    this.loadScene(serializeScene(new THREE.Group()));
+    return false;
+  }
+
+  _autosave(snap) {
+    try {
+      localStorage.setItem(AUTOSAVE_KEY, snap);
+    } catch {
+      // ストレージが使えない環境では自動保存しない
+    }
+  }
+
+  // ---------------------------------------------------------------- 書き出し
+
+  /** 書き出し用に、選択枠などを含まない「見えている部品だけ」のコピーを作る */
+  _exportRoot() {
+    const root = new THREE.Group();
+    root.name = 'Model';
+    const copy = (src, dst) => {
+      for (const child of src.children) {
+        if (!isStudioObject(child) || !child.visible) continue;
+        const c = child.isMesh ? new THREE.Mesh(child.geometry, child.material) : new THREE.Group();
+        c.name = child.name;
+        c.position.copy(child.position);
+        c.quaternion.copy(child.quaternion);
+        c.scale.copy(child.scale);
+        dst.add(c);
+        copy(child, c);
+      }
+    };
+    copy(this.modelRoot, root);
+    root.updateMatrixWorld(true);
+    return root;
+  }
+
+  async exportModel(format) {
+    const root = this._exportRoot();
+    switch (format) {
+      case 'glb': {
+        const buffer = await new GLTFExporter().parseAsync(root, { binary: true });
+        return new Blob([buffer], { type: 'model/gltf-binary' });
+      }
+      case 'gltf': {
+        const json = await new GLTFExporter().parseAsync(root, { binary: false });
+        return new Blob([JSON.stringify(json, null, 2)], { type: 'model/gltf+json' });
+      }
+      case 'obj':
+        return new Blob([new OBJExporter().parse(root)], { type: 'text/plain' });
+      case 'stl': {
+        const data = new STLExporter().parse(root, { binary: true });
+        return new Blob([data], { type: 'model/stl' });
+      }
+      default:
+        throw new Error(`未対応の形式です: ${format}`);
+    }
+  }
+
+  async screenshot() {
+    const prev = {
+      helpers: this.helpers.visible,
+      boxes: this.selectionBoxes.visible,
+      gizmo: this.transform.getHelper().visible,
+    };
+    this.helpers.visible = false;
+    this.selectionBoxes.visible = false;
+    this.transform.getHelper().visible = false;
+    this.renderer.render(this.scene, this.camera);
+    const blob = await new Promise((resolve) => this.renderer.domElement.toBlob(resolve, 'image/png'));
+    this.helpers.visible = prev.helpers;
+    this.selectionBoxes.visible = prev.boxes;
+    this.transform.getHelper().visible = prev.gizmo;
+    return blob;
+  }
+}

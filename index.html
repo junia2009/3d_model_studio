@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3D Model Studio</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧊</text></svg>" />
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <header class="toolbar">
+      <div class="brand">🧊 3D Model Studio</div>
+
+      <div class="tool-group" aria-label="ファイル">
+        <button data-action="new" title="新規作成">新規</button>
+        <button data-action="open" title="JSON ファイルを開く (Ctrl+O)">開く</button>
+        <button data-action="save" title="JSON ファイルとして保存 (Ctrl+S)">保存</button>
+        <details class="menu">
+          <summary title="他のソフトで使える形式で書き出す">書き出し ▾</summary>
+          <div class="menu-items">
+            <button data-export="glb">GLB (.glb)</button>
+            <button data-export="gltf">glTF (.gltf)</button>
+            <button data-export="obj">OBJ (.obj)</button>
+            <button data-export="stl">STL (.stl) — 3D プリント向け</button>
+            <button data-export="png">画像 (.png)</button>
+          </div>
+        </details>
+        <button data-action="sample" title="サンプルモデルを読み込む">サンプル</button>
+      </div>
+
+      <div class="tool-group" aria-label="履歴">
+        <button data-action="undo" title="元に戻す (Ctrl+Z)">↶</button>
+        <button data-action="redo" title="やり直し (Ctrl+Shift+Z / Ctrl+Y)">↷</button>
+      </div>
+
+      <div class="tool-group" aria-label="変形モード">
+        <button data-mode="translate" title="移動 (W)">✥ 移動</button>
+        <button data-mode="rotate" title="回転 (E)">⟳ 回転</button>
+        <button data-mode="scale" title="拡大縮小 (R)">⤢ 拡縮</button>
+        <button data-action="space" title="ローカル / ワールド座標の切替 (Q)">ワールド</button>
+        <button data-action="snap" title="スナップ ON/OFF (X)">スナップ</button>
+      </div>
+
+      <div class="tool-group" aria-label="編集">
+        <button data-action="duplicate" title="複製 (Ctrl+D)">複製</button>
+        <button data-action="mirror" title="左右反転してコピー (M)">反転コピー</button>
+        <button data-action="group" title="グループ化 (Ctrl+G)">グループ化</button>
+        <button data-action="ungroup" title="グループ解除 (Ctrl+Shift+G)">解除</button>
+        <button data-action="ground" title="床に置く (G)">床に置く</button>
+        <button data-action="delete" title="削除 (Delete)" class="danger">削除</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="panel left">
+        <section>
+          <h2>部品</h2>
+          <p class="hint">クリックで追加</p>
+          <div id="palette" class="palette"></div>
+        </section>
+        <section class="grow">
+          <h2>アウトライナー</h2>
+          <p class="hint">ドラッグでグループに出し入れ・並べ替え</p>
+          <div id="outliner" class="outliner"></div>
+        </section>
+      </aside>
+
+      <main class="viewport" id="viewport">
+        <div class="view-buttons">
+          <button data-view="front" title="正面">正面</button>
+          <button data-view="right" title="右">右</button>
+          <button data-view="top" title="上">上</button>
+          <button data-view="iso" title="斜め">斜め</button>
+          <button data-action="focus" title="選択物にズーム (F)">フォーカス</button>
+          <button data-action="grid" title="グリッド表示切替">グリッド</button>
+        </div>
+        <div class="empty-hint" id="empty-hint">
+          左の「部品」から形を追加して、組み合わせてモデルを作りましょう。<br />
+          <span>または上の「サンプル」を開いてみてください。</span>
+        </div>
+      </main>
+
+      <aside class="panel right">
+        <h2>プロパティ</h2>
+        <div id="properties"></div>
+      </aside>
+    </div>
+
+    <footer class="statusbar">
+      <span id="status">準備完了</span>
+      <span class="keys">
+        左ドラッグ: 回転 ／ 右ドラッグ: 平行移動 ／ ホイール: ズーム ／ Shift+クリック: 複数選択 ／ Alt+クリック: グループ内の部品を選択
+      </span>
+    </footer>
+
+    <input type="file" id="file-input" accept=".json,application/json" hidden />
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

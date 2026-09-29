@@ -1,0 +1,510 @@
+import * as THREE from 'three';
+import { PRIMITIVES } from './primitives.js';
+import { readMaterialProps } from './serializer.js';
+
+const SWATCHES = [
+  '#f5f5f5', '#9aa0aa', '#3a3d45', '#ff5d5d', '#ff9f43',
+  '#ffd43b', '#51cf66', '#22b8cf', '#4f8cff', '#b197fc',
+  '#f783ac', '#c08457', '#7a4b2a', '#2f9e44', '#1c3d7a',
+  '#ffe8cc', '#ffc9c9', '#d3f9d8', '#d0ebff', '#e5dbff',
+];
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === 'class') node.className = v;
+    else if (k === 'dataset') Object.assign(node.dataset, v);
+    else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of children.flat()) if (c !== null && c !== undefined) node.append(c);
+  return node;
+}
+
+const fmt = (n, digits = 3) => {
+  const v = Number(n.toFixed(digits));
+  return Object.is(v, -0) ? '0' : String(v);
+};
+
+// ================================================================ パレット
+
+export function initPalette(container, editor) {
+  for (const [type, def] of Object.entries(PRIMITIVES)) {
+    container.append(
+      el(
+        'button',
+        { title: `${def.label}を追加`, onclick: () => editor.addPrimitive(type) },
+        el('span', { class: 'icon' }, def.icon),
+        el('span', {}, def.label),
+      ),
+    );
+  }
+}
+
+// ================================================================ アウトライナー
+
+export function initOutliner(container, editor) {
+  const collapsed = new Set();
+  let dragged = null;
+
+  const render = () => {
+    container.replaceChildren();
+    const roots = editor.modelRoot.children.filter((o) => o.userData.kind);
+    if (!roots.length) {
+      container.append(el('div', { class: 'empty' }, 'まだ部品がありません'));
+    }
+    for (const o of roots) addRow(o, 0);
+    // 一番下の余白：ここにドロップするとトップレベルの末尾へ移動
+    const rootDrop = el('div', { class: 'root-drop' });
+    rootDrop.addEventListener('dragover', (e) => {
+      if (dragged) e.preventDefault();
+    });
+    rootDrop.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (dragged) editor.reparent(dragged, editor.modelRoot);
+    });
+    container.append(rootDrop);
+    updateSelection();
+  };
+
+  const addRow = (obj, depth) => {
+    const isGroup = obj.userData.kind === 'group';
+    const hasChildren = obj.children.some((c) => c.userData.kind);
+    const isCollapsed = collapsed.has(obj.userData.id);
+
+    const name = el('span', { class: 'name', title: 'ダブルクリックで名前を変更' }, obj.name || '(名前なし)');
+    const row = el(
+      'div',
+      {
+        class: `tree-row${obj.visible ? '' : ' hidden-obj'}`,
+        draggable: 'true',
+        dataset: { id: obj.userData.id },
+        style: `padding-left:${6 + depth * 14}px`,
+      },
+      el(
+        'span',
+        {
+          class: 'twisty',
+          onclick: (e) => {
+            e.stopPropagation();
+            if (isCollapsed) collapsed.delete(obj.userData.id);
+            else collapsed.add(obj.userData.id);
+            render();
+          },
+        },
+        hasChildren ? (isCollapsed ? '▸' : '▾') : '',
+      ),
+      el('span', { class: 'kind' }, isGroup ? '📁' : PRIMITIVES[obj.userData.type]?.icon ?? '?'),
+      name,
+      el(
+        'button',
+        {
+          class: 'eye',
+          title: obj.visible ? '非表示にする' : '表示する',
+          onclick: (e) => {
+            e.stopPropagation();
+            editor.setVisible(obj, !obj.visible);
+          },
+        },
+        obj.visible ? '👁' : '◌',
+      ),
+    );
+
+    row.addEventListener('click', (e) => {
+      editor.select([obj], { toggle: e.shiftKey || e.ctrlKey || e.metaKey });
+    });
+    name.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      startRename(name, obj);
+    });
+
+    // ---- ドラッグ＆ドロップ
+    row.addEventListener('dragstart', (e) => {
+      dragged = obj;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', obj.userData.id);
+    });
+    row.addEventListener('dragend', () => {
+      dragged = null;
+      clearDropMarks();
+    });
+    row.addEventListener('dragover', (e) => {
+      if (!dragged || dragged === obj) return;
+      e.preventDefault();
+      clearDropMarks();
+      row.classList.add(dropZone(e, row, isGroup) === 'into' ? 'drop-into' : 'drop-before');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drop-into', 'drop-before'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (!dragged || dragged === obj) return;
+      if (dropZone(e, row, isGroup) === 'into') editor.reparent(dragged, obj);
+      else editor.reparent(dragged, obj.parent, obj);
+    });
+
+    container.append(row);
+    if (hasChildren && !isCollapsed) {
+      for (const c of obj.children) if (c.userData.kind) addRow(c, depth + 1);
+    }
+  };
+
+  // グループ行の下 2/3 にドロップすると「中へ」、上 1/3 なら「前へ」
+  const dropZone = (e, row, isGroup) => {
+    if (!isGroup) return 'before';
+    const rect = row.getBoundingClientRect();
+    return e.clientY - rect.top > rect.height / 3 ? 'into' : 'before';
+  };
+
+  const clearDropMarks = () => {
+    container.querySelectorAll('.drop-into, .drop-before').forEach((r) => r.classList.remove('drop-into', 'drop-before'));
+  };
+
+  const startRename = (span, obj) => {
+    const input = el('input', { type: 'text', value: obj.name });
+    span.replaceChildren(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      if (save && input.value.trim() && input.value !== obj.name) editor.rename(obj, input.value.trim());
+      else render();
+    };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') finish(true);
+      if (e.key === 'Escape') finish(false);
+    });
+    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('click', (e) => e.stopPropagation());
+  };
+
+  const updateSelection = () => {
+    const ids = new Set(editor.selected.map((o) => o.userData.id));
+    const primaryId = editor.primary?.userData.id;
+    for (const row of container.querySelectorAll('.tree-row')) {
+      row.classList.toggle('selected', ids.has(row.dataset.id));
+      row.classList.toggle('primary', row.dataset.id === primaryId);
+    }
+    // 選択した行が折りたたまれたグループの中にある場合は開く
+    let reopened = false;
+    for (const o of editor.selected) {
+      for (let p = o.parent; p && p !== editor.modelRoot; p = p.parent) {
+        if (collapsed.delete(p.userData.id)) reopened = true;
+      }
+    }
+    if (reopened) render();
+  };
+
+  editor.addEventListener('change', render);
+  editor.addEventListener('selection', updateSelection);
+  render();
+}
+
+// ================================================================ プロパティ
+
+export function initProperties(container, editor) {
+  let structureKey = '';
+  let syncers = [];
+
+  const render = () => {
+    // 選択や中身の部品構成が変わったときだけ作り直し、それ以外は値の更新だけにする（入力中のフォーカスを保つため）
+    const key = [
+      editor.selected.map((o) => `${o.userData.id}:${o.userData.type ?? 'g'}`).join('|'),
+      editor.selectedMeshes().map((m) => m.userData.id).join(','),
+    ].join('#');
+    if (key === structureKey) {
+      sync();
+      return;
+    }
+    structureKey = key;
+    syncers = [];
+    container.replaceChildren();
+
+    const obj = editor.primary;
+    if (!obj) {
+      container.append(
+        el(
+          'div',
+          { class: 'props-empty' },
+          '何も選択されていません。',
+          el('br'),
+          'ビューポートかアウトライナーで部品をクリックすると、ここで位置・大きさ・色などを編集できます。',
+        ),
+      );
+      return;
+    }
+
+    const isGroup = obj.userData.kind === 'group';
+    const typeLabel = isGroup ? 'グループ' : PRIMITIVES[obj.userData.type].label;
+
+    if (editor.selected.length > 1) {
+      container.append(
+        el(
+          'p',
+          { class: 'note' },
+          `${editor.selected.length} 個を選択中。ギズモでまとめて動かせます。下の値は最後に選んだ「${obj.name}」のもの、色は全部に適用されます。`,
+        ),
+      );
+    }
+
+    // ---- 基本
+    container.append(
+      field('名前', textInput(() => obj.name, (v) => editor.rename(obj, v))),
+      field('種類', el('span', {}, el('span', { class: 'badge' }, typeLabel))),
+    );
+
+    // ---- トランスフォーム
+    container.append(el('h3', {}, 'トランスフォーム'));
+    container.append(
+      vecField('位置', 0.05, () => obj.position.toArray(), (v) => editor.updateTransform(obj, { position: v })),
+      vecField(
+        '回転 (°)',
+        1,
+        () => [obj.rotation.x, obj.rotation.y, obj.rotation.z].map((r) => THREE.MathUtils.radToDeg(r)),
+        (v) => editor.updateTransform(obj, { rotation: v }),
+        1,
+      ),
+      vecField('スケール', 0.05, () => obj.scale.toArray(), (v) => editor.updateTransform(obj, { scale: v })),
+      field(
+        '一律スケール',
+        numberInput({
+          step: 0.05,
+          get: () => (obj.scale.x + obj.scale.y + obj.scale.z) / 3,
+          set: (v) => {
+            const avg = (obj.scale.x + obj.scale.y + obj.scale.z) / 3 || 1;
+            const k = v / avg;
+            editor.updateTransform(obj, { scale: obj.scale.toArray().map((s) => s * k) });
+          },
+        }),
+        true,
+      ),
+    );
+
+    // ---- 形状パラメータ
+    if (!isGroup) {
+      const def = PRIMITIVES[obj.userData.type];
+      container.append(el('h3', {}, '形状'));
+      for (const p of def.params) {
+        container.append(
+          field(
+            p.label,
+            rangeInput({
+              min: p.min,
+              max: p.max,
+              step: p.step,
+              get: () => obj.userData.params[p.key],
+              set: (v) => editor.updateParams(obj, { [p.key]: v }),
+            }),
+          ),
+        );
+      }
+    }
+
+    // ---- マテリアル
+    const meshes = editor.selectedMeshes();
+    if (meshes.length) {
+      const mat = () => readMaterialProps(meshes[0].material);
+      container.append(el('h3', {}, meshes.length > 1 ? `マテリアル（${meshes.length} 個の部品に適用）` : 'マテリアル'));
+      container.append(field('色', colorInput(() => mat().color, (v) => editor.updateMaterial({ color: v }))));
+      container.append(
+        el(
+          'div',
+          { class: 'swatches' },
+          SWATCHES.map((c) =>
+            el('button', {
+              title: c,
+              style: `background:${c}`,
+              onclick: () => {
+                editor.updateMaterial({ color: c });
+                editor.commit();
+              },
+            }),
+          ),
+        ),
+      );
+      container.append(
+        field('金属っぽさ', rangeInput({ min: 0, max: 1, step: 0.01, get: () => mat().metalness, set: (v) => editor.updateMaterial({ metalness: v }) })),
+        field('ざらつき', rangeInput({ min: 0, max: 1, step: 0.01, get: () => mat().roughness, set: (v) => editor.updateMaterial({ roughness: v }) })),
+        field('不透明度', rangeInput({ min: 0, max: 1, step: 0.01, get: () => mat().opacity, set: (v) => editor.updateMaterial({ opacity: v }) })),
+        field('', checkbox('ワイヤーフレーム', () => mat().wireframe, (v) => editor.updateMaterial({ wireframe: v }))),
+        field('', checkbox('カクカク表示', () => mat().flatShading, (v) => editor.updateMaterial({ flatShading: v }))),
+      );
+    }
+  };
+
+  const sync = () => {
+    for (const s of syncers) s();
+  };
+
+  // ---------------- フィールド部品
+
+  function field(label, control, scrubbable = false) {
+    const lab = el('label', {}, label);
+    if (scrubbable && control._scrub) makeScrub(lab, control._scrub);
+    return el('div', { class: 'field' }, lab, control);
+  }
+
+  function vecField(label, step, get, set, digits = 3) {
+    const inputs = ['X', 'Y', 'Z'].map((axis, i) =>
+      numberInput({
+        step,
+        digits,
+        get: () => get()[i],
+        set: (v) => {
+          const values = get();
+          values[i] = v;
+          set(values);
+        },
+      }),
+    );
+    const lab = el('label', { class: 'vec-label' }, label);
+    return el(
+      'div',
+      { class: 'field vec-field' },
+      lab,
+      el(
+        'div',
+        { class: 'vec' },
+        inputs.map((inp, i) => {
+          // 軸ラベル（X/Y/Z）を左右ドラッグしても値を変えられる
+          const axisLabel = el('span', { class: 'axis-label' }, 'XYZ'[i]);
+          makeScrub(axisLabel, inp._scrub);
+          return el('div', { class: 'axis', dataset: { axis: 'XYZ'[i] } }, axisLabel, inp);
+        }),
+      ),
+    );
+  }
+
+  /** 数値入力。入力中はライブ反映し、確定（change）で履歴に積む。ラベルの左右ドラッグでも値を変えられる */
+  function numberInput({ step, digits = 3, get, set }) {
+    const input = el('input', { type: 'number', step });
+    const refresh = () => {
+      if (document.activeElement !== input) input.value = fmt(get(), digits);
+    };
+    input.addEventListener('input', () => {
+      const v = parseFloat(input.value);
+      if (Number.isFinite(v)) set(v);
+    });
+    input.addEventListener('change', () => {
+      editor.commit();
+      input.value = fmt(get(), digits);
+    });
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') input.blur();
+    });
+    input._scrub = { step, get, set };
+    syncers.push(refresh);
+    refresh();
+    return input;
+  }
+
+  function makeScrub(labelEl, { step, get, set }) {
+    labelEl.classList.add('scrub');
+    labelEl.title = '左右にドラッグして値を変更';
+    labelEl.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const start = get();
+      labelEl.setPointerCapture(e.pointerId);
+      const move = (ev) => {
+        set(start + Math.round((ev.clientX - startX) / 2) * step);
+        sync();
+      };
+      const up = () => {
+        labelEl.removeEventListener('pointermove', move);
+        labelEl.removeEventListener('pointerup', up);
+        editor.commit();
+      };
+      labelEl.addEventListener('pointermove', move);
+      labelEl.addEventListener('pointerup', up);
+    });
+  }
+
+  function rangeInput({ min, max, step, get, set }) {
+    const range = el('input', { type: 'range', min, max, step });
+    const number = el('input', { type: 'number', min, max, step });
+    const refresh = () => {
+      const v = get();
+      range.value = v;
+      if (document.activeElement !== number) number.value = fmt(v);
+    };
+    const apply = (raw) => {
+      const v = parseFloat(raw);
+      if (!Number.isFinite(v)) return;
+      set(Math.min(max, Math.max(min, v)));
+    };
+    range.addEventListener('input', () => {
+      apply(range.value);
+      number.value = fmt(get());
+    });
+    range.addEventListener('change', () => editor.commit());
+    number.addEventListener('input', () => {
+      apply(number.value);
+      range.value = get();
+    });
+    number.addEventListener('change', () => {
+      editor.commit();
+      refresh();
+    });
+    number.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') number.blur();
+    });
+    syncers.push(refresh);
+    refresh();
+    return el('div', { class: 'range-row' }, range, number);
+  }
+
+  function textInput(get, set) {
+    const input = el('input', { type: 'text' });
+    const refresh = () => {
+      if (document.activeElement !== input) input.value = get();
+    };
+    input.addEventListener('change', () => {
+      if (input.value.trim()) set(input.value.trim());
+      else refresh();
+    });
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') input.blur();
+    });
+    syncers.push(refresh);
+    refresh();
+    return input;
+  }
+
+  function colorInput(get, set) {
+    const input = el('input', { type: 'color' });
+    const refresh = () => {
+      input.value = get();
+    };
+    input.addEventListener('input', () => set(input.value));
+    input.addEventListener('change', () => editor.commit());
+    syncers.push(refresh);
+    refresh();
+    return input;
+  }
+
+  function checkbox(label, get, set) {
+    const input = el('input', { type: 'checkbox' });
+    const refresh = () => {
+      input.checked = get();
+    };
+    input.addEventListener('change', () => {
+      set(input.checked);
+      editor.commit();
+    });
+    syncers.push(refresh);
+    refresh();
+    return el('label', { class: 'checkbox' }, input, label);
+  }
+
+  editor.addEventListener('selection', render);
+  editor.addEventListener('change', render);
+  editor.addEventListener('transform', sync);
+  render();
+}

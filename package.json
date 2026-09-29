@@ -1,0 +1,23 @@
+{
+  "name": "3d-model-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Three.js だけで作る、プリミティブを組み合わせて3Dモデルを作成できるブラウザスタジオ",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/junia2009/3d_model_studio.git"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "vite": "^8.3.1"
+  }
+}
