@@ -6,6 +6,8 @@ import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
 
 import { PRIMITIVES, buildGeometry } from './primitives.js';
+import { DEFAULT_WORLD, getWorld } from './worlds/index.js';
+import { disposeTree } from './worlds/common.js';
 import { History } from './history.js';
 import {
   applyMaterialProps,
@@ -20,6 +22,10 @@ import {
 } from './serializer.js';
 
 const AUTOSAVE_KEY = 'three-model-studio:autosave';
+const WORLD_KEY = 'three-model-studio:world';
+
+/** 「作業用ライト」：世界の光に関係なく、部品の色がそのまま見える明かり */
+const WORK_LIGHTS = { hemi: ['#ffffff', '#445066', 1.4], sun: ['#ffffff', 2.2, [5, 10, 6]], exposure: 1 };
 
 export const SNAP = {
   translate: 0.25,
@@ -48,6 +54,8 @@ export class Editor extends EventTarget {
 
     this._initRenderer();
     this._initScene();
+    this.workLight = false;
+    this.setWorld(DEFAULT_WORLD, { save: false });
     this._initControls();
     this._initPicking();
     this._initObjectDrag();
@@ -79,9 +87,11 @@ export class Editor extends EventTarget {
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.05, 500);
     this.camera.position.set(4, 3.5, 5);
 
-    // ライト
-    scene.add(new THREE.HemisphereLight('#ffffff', '#445066', 1.4));
+    // ライト（色や向きは世界ごとに setWorld で変わる）
+    this.hemi = new THREE.HemisphereLight('#ffffff', '#445066', 1.4);
+    scene.add(this.hemi);
     const sun = new THREE.DirectionalLight('#ffffff', 2.2);
+    this.sun = sun;
     sun.position.set(5, 10, 6);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -104,12 +114,21 @@ export class Editor extends EventTarget {
     this.helpers.add(axes);
     const shadowPlane = new THREE.Mesh(
       new THREE.PlaneGeometry(40, 40),
-      new THREE.ShadowMaterial({ opacity: 0.25 }),
+      // 奥の地面やグリッドを隠さないよう、深度は書き込まない
+      new THREE.ShadowMaterial({ opacity: 0.25, depthWrite: false }),
     );
     shadowPlane.rotation.x = -Math.PI / 2;
+    shadowPlane.position.y = 0.003;
     shadowPlane.receiveShadow = true;
+    this.shadowPlane = shadowPlane;
     scene.add(shadowPlane);
     scene.add(this.helpers);
+
+    // 世界（背景・地面・空など）。モデルとは別に持ち、書き出しや選択の対象にしない
+    this.worldRoot = new THREE.Group();
+    this.worldRoot.name = '__world';
+    scene.add(this.worldRoot);
+    this.timer = new THREE.Timer();
 
     // ユーザーが作るモデルはすべてここにぶら下げる
     this.modelRoot = new THREE.Group();
@@ -141,6 +160,8 @@ export class Editor extends EventTarget {
     this.orbit.enableDamping = true;
     this.orbit.dampingFactor = 0.12;
     this.orbit.target.set(0, 0.5, 0);
+    // 世界の遠景（空・山など）の外に出ないよう、離れすぎないようにする
+    this.orbit.maxDistance = 90;
     this.orbit.update();
 
     transform.addEventListener('dragging-changed', (e) => {
@@ -442,7 +463,87 @@ export class Editor extends EventTarget {
   _render() {
     this.orbit.update();
     for (const box of this.selectionBoxes.children) box.update();
+    this.timer.update();
+    const dt = Math.min(this.timer.getDelta(), 0.1);
+    const t = this.timer.getElapsed();
+    for (const f of this._worldFollowers) f.position.copy(this.camera.position);
+    for (const o of this._worldAnimated) o.userData.update(dt, t, this.camera);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  // ---------------------------------------------------------------- 世界（背景）
+
+  /** 世界を切り替える。save: false なら選択を記憶しない（起動時など） */
+  setWorld(id, { save = true } = {}) {
+    const def = getWorld(id) ?? getWorld(DEFAULT_WORLD);
+    if (this.world) {
+      for (const child of [...this.worldRoot.children]) {
+        this.worldRoot.remove(child);
+        disposeTree(child);
+      }
+    }
+    const world = def.create({ renderer: this.renderer, camera: this.camera });
+    this.world = world;
+    this.worldId = def.id;
+    this.worldRoot.add(world.group);
+    this._worldFollowers = world.followers ?? [];
+    for (const f of this._worldFollowers) this.worldRoot.add(f);
+    this._worldAnimated = [];
+    this.worldRoot.traverse((o) => {
+      if (typeof o.userData.update === 'function') this._worldAnimated.push(o);
+    });
+
+    this.scene.background = world.background ?? null;
+    this.scene.fog = world.fog ?? null;
+    this.helpers.visible = world.grid ?? false;
+    const shadow = world.shadowOpacity ?? 0.25;
+    this.shadowPlane.visible = shadow > 0;
+    this.shadowPlane.material.opacity = shadow;
+
+    // 金属や光沢のある部品に映り込む景色
+    this._worldEnv?.dispose();
+    this._worldEnv = null;
+    if (world.env) {
+      this._pmrem ??= new THREE.PMREMGenerator(this.renderer);
+      this._worldEnv = this._pmrem.fromScene(world.env, 0.04);
+      world.env.traverse?.((o) => {
+        o.geometry?.dispose();
+        o.material?.dispose();
+      });
+    }
+    this._applyWorldLights();
+
+    if (save) {
+      try {
+        localStorage.setItem(WORLD_KEY, def.id);
+      } catch {
+        // 保存できなくても切り替え自体は行う
+      }
+    }
+    this.dispatchEvent(new Event('world'));
+  }
+
+  setWorkLight(enabled) {
+    this.workLight = enabled;
+    this._applyWorldLights();
+    this.dispatchEvent(new Event('world'));
+  }
+
+  _applyWorldLights() {
+    const w = this.world;
+    const L = this.workLight ? WORK_LIGHTS : w.lights;
+    const [sky, ground, hemiIntensity] = L.hemi;
+    const [sunColor, sunIntensity, [x, y, z]] = L.sun;
+    this.hemi.color.set(sky);
+    this.hemi.groundColor.set(ground);
+    this.hemi.intensity = hemiIntensity;
+    this.sun.color.set(sunColor);
+    this.sun.intensity = sunIntensity;
+    // 影が作業エリアに落ちるよう、光の向きだけを使って距離はそろえる
+    this.sun.position.set(x, y, z).normalize().multiplyScalar(15);
+    this.renderer.toneMappingExposure = this.workLight ? WORK_LIGHTS.exposure : (w.exposure ?? 1);
+    this.scene.environment = this.workLight ? null : (this._worldEnv?.texture ?? null);
+    this.scene.environmentIntensity = w.envIntensity ?? 0.5;
   }
 
   // ---------------------------------------------------------------- 選択
@@ -849,6 +950,8 @@ export class Editor extends EventTarget {
   loadScene(data) {
     validateSceneData(data);
     this.select([]);
+    // 世界の情報がある保存ファイルなら、その世界に切り替える
+    if (data.world && getWorld(data.world) && data.world !== this.worldId) this.setWorld(data.world);
     this._loadObjects(data.objects);
     const snap = this.snapshot();
     this.history.reset(snap);
@@ -862,10 +965,16 @@ export class Editor extends EventTarget {
   }
 
   getSceneData() {
-    return serializeScene(this.modelRoot);
+    return { ...serializeScene(this.modelRoot), world: this.worldId };
   }
 
   restoreAutosave() {
+    try {
+      const worldId = localStorage.getItem(WORLD_KEY);
+      if (worldId && getWorld(worldId)) this.setWorld(worldId, { save: false });
+    } catch {
+      // 読めなければ最初の世界のまま
+    }
     try {
       const raw = localStorage.getItem(AUTOSAVE_KEY);
       if (raw) {

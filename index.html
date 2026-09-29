@@ -47,6 +47,13 @@
         <button data-action="sample" title="サンプルモデルを読み込む">サンプル</button>
       </div>
 
+      <div class="tool-group desktop-only" aria-label="世界">
+        <details class="menu world-menu">
+          <summary class="world-summary" title="背景の世界を選ぶ">🌍 <span data-world-name>世界</span> ▾</summary>
+          <div class="menu-items world-popover" data-world-picker></div>
+        </details>
+      </div>
+
       <div class="tool-group" aria-label="履歴">
         <button data-action="undo" class="icon-btn" title="元に戻す (Ctrl+Z)" aria-label="元に戻す">↶</button>
         <button data-action="redo" class="icon-btn" title="やり直し (Ctrl+Shift+Z / Ctrl+Y)" aria-label="やり直し">↷</button>
@@ -154,6 +161,17 @@
         </section>
       </aside>
 
+      <!-- タブレット・スマホ用の世界選び -->
+      <aside class="panel world-panel compact-only" aria-label="世界">
+        <section class="sheet-section" data-section="world">
+          <div class="sheet-head">
+            <h2>世界</h2>
+            <button class="sheet-close" data-sheet-close aria-label="閉じる">✕</button>
+          </div>
+          <div data-world-picker></div>
+        </section>
+      </aside>
+
       <!-- タブレット・スマホ用メニュー（PC ではツールバーにある機能） -->
       <aside class="panel menu-panel compact-only" aria-label="メニュー">
         <section class="sheet-section" data-section="menu">
@@ -198,6 +216,7 @@
       <button data-sheet="add"><span>＋</span><small>部品</small></button>
       <button data-sheet="tree"><span>☰</span><small>一覧</small></button>
       <button data-sheet="props"><span>⚙</span><small>調整</small></button>
+      <button data-sheet="world"><span>🌍</span><small>世界</small></button>
       <button data-sheet="menu"><span>⋯</span><small>メニュー</small></button>
     </nav>
 

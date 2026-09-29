@@ -1,5 +1,5 @@
 import { Editor } from './editor.js';
-import { initOutliner, initPalette, initProperties } from './ui.js';
+import { initOutliner, initPalette, initProperties, initWorldPicker } from './ui.js';
 import { sampleScene } from './sample.js';
 import { initPWA } from './pwa.js';
 
@@ -10,6 +10,7 @@ const editor = new Editor($('#viewport'));
 initPalette($('#palette'), editor);
 initOutliner($('#outliner'), editor);
 initProperties($('#properties'), editor);
+initWorldPicker($$('[data-world-picker]'), editor);
 
 // ---------------------------------------------------------------- 通知
 

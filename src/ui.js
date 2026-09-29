@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { PRIMITIVES } from './primitives.js';
+import { WORLD_GROUPS, getWorld } from './worlds/index.js';
 import { readMaterialProps } from './serializer.js';
 
 const SWATCHES = [
@@ -568,4 +569,49 @@ export function initProperties(container, editor) {
   editor.addEventListener('change', render);
   editor.addEventListener('transform', sync);
   render();
+}
+
+// ================================================================ 世界の選択
+
+/** 世界の一覧（見本付きのカード）と「作業用ライト」を、PC のメニューとタブレット・スマホのパネルの両方に作る */
+export function initWorldPicker(containers, editor) {
+  for (const container of containers) {
+    for (const group of WORLD_GROUPS) {
+      container.append(el('div', { class: 'world-group-label' }, group.label));
+      container.append(
+        el(
+          'div',
+          { class: 'world-grid' },
+          group.worlds.map((w) =>
+            el(
+              'button',
+              { class: 'world-card', dataset: { worldId: w.id }, title: w.label, onclick: () => editor.setWorld(w.id) },
+              el('span', { class: 'world-preview', style: `background:${w.preview}` }, el('span', { class: 'world-icon' }, w.icon)),
+              el('span', { class: 'world-name' }, w.label),
+            ),
+          ),
+        ),
+      );
+    }
+    const workLight = el('input', { type: 'checkbox', onchange: (e) => editor.setWorkLight(e.target.checked) });
+    container.append(
+      el(
+        'div',
+        { class: 'world-options' },
+        el('label', { class: 'checkbox' }, workLight, '作業用ライト'),
+        el('p', { class: 'note' }, 'ON にすると、世界の光（夕焼けの色など）に関係なく部品の色がそのまま見えます。'),
+      ),
+    );
+    container._workLight = workLight;
+  }
+
+  const sync = () => {
+    for (const card of document.querySelectorAll('.world-card')) {
+      card.classList.toggle('active', card.dataset.worldId === editor.worldId);
+    }
+    for (const c of containers) c._workLight.checked = editor.workLight;
+    for (const n of document.querySelectorAll('[data-world-name]')) n.textContent = getWorld(editor.worldId)?.label ?? '世界';
+  };
+  editor.addEventListener('world', sync);
+  sync();
 }
