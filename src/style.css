@@ -9,6 +9,10 @@
   --accent-2: #ffb020;
   --danger: #ff5d5d;
   --radius: 6px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
   color-scheme: dark;
 }
 
@@ -25,11 +29,18 @@ body {
   font-family: system-ui, -apple-system, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
   font-size: 13px;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {
+  height: 100dvh;
   display: grid;
   grid-template-rows: auto 1fr auto;
+  /* ダブルタップでのページ拡大や長押しメニューを抑える */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-text-size-adjust: 100%;
 }
 
 button,
@@ -49,12 +60,24 @@ summary {
   cursor: pointer;
   white-space: nowrap;
   user-select: none;
+  -webkit-user-select: none;
 }
 
-button:hover,
-summary:hover {
-  border-color: #4b5264;
-  background: #313644;
+@media (hover: hover) {
+  button:hover,
+  summary:hover {
+    border-color: #4b5264;
+    background: #313644;
+  }
+
+  button.danger:hover {
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+}
+
+button:active {
+  filter: brightness(1.2);
 }
 
 button:disabled {
@@ -68,19 +91,54 @@ button.active {
   color: #fff;
 }
 
-button.danger:hover {
-  border-color: var(--danger);
-  color: var(--danger);
+button.install,
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 
-/* ---------------- ツールバー ---------------- */
+[hidden] {
+  display: none !important;
+}
+
+h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 0;
+}
+
+h3 {
+  font-size: 12px;
+  margin: 14px 0 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.hint {
+  margin: 4px 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.note {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  margin: 4px 0 8px;
+}
+
+/* ================================================================ ツールバー */
 
 .toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 14px;
-  padding: 8px 12px;
+  padding: calc(8px + var(--safe-top)) calc(12px + var(--safe-right)) 8px calc(12px + var(--safe-left));
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
@@ -94,6 +152,17 @@ button.danger:hover {
   margin-right: 6px;
 }
 
+.tool-group {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.icon-btn {
+  font-size: 16px;
+  min-width: 36px;
+}
+
 .pwa-group {
   margin-left: auto;
 }
@@ -105,23 +174,6 @@ button.danger:hover {
   border: 1px solid var(--accent-2);
   color: var(--accent-2);
   font-size: 11px;
-}
-
-button.install,
-button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-[hidden] {
-  display: none !important;
-}
-
-.tool-group {
-  display: flex;
-  gap: 4px;
-  align-items: center;
 }
 
 .menu {
@@ -162,9 +214,10 @@ button.primary {
   background: var(--panel-2);
 }
 
-/* ---------------- レイアウト ---------------- */
+/* ================================================================ レイアウト（PC） */
 
 .layout {
+  position: relative;
   display: grid;
   grid-template-columns: 240px 1fr 300px;
   min-height: 0;
@@ -173,6 +226,7 @@ button.primary {
 .panel {
   background: var(--panel);
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 10px 12px;
   min-height: 0;
 }
@@ -195,29 +249,23 @@ button.primary {
   border-left: 1px solid var(--border);
 }
 
-h2 {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  margin: 0 0 4px;
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
 }
 
-h3 {
-  font-size: 12px;
-  margin: 14px 0 6px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
+.sheet-close {
+  border: none;
+  background: transparent;
+  font-size: 16px;
+  padding: 4px 10px;
   color: var(--muted);
 }
 
-.hint {
-  margin: 0 0 8px;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-/* ---------------- パレット ---------------- */
+/* ================================================================ パレット */
 
 .palette {
   display: grid;
@@ -240,7 +288,7 @@ h3 {
   color: var(--accent);
 }
 
-/* ---------------- アウトライナー ---------------- */
+/* ================================================================ アウトライナー */
 
 .outliner {
   flex: 1;
@@ -266,10 +314,14 @@ h3 {
   cursor: pointer;
   border-top: 2px solid transparent;
   border-bottom: 2px solid transparent;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-.tree-row:hover {
-  background: var(--panel-2);
+@media (hover: hover) {
+  .tree-row:hover {
+    background: var(--panel-2);
+  }
 }
 
 .tree-row.selected {
@@ -284,6 +336,10 @@ h3 {
   opacity: 0.45;
 }
 
+.tree-row.dragging {
+  opacity: 0.4;
+}
+
 .tree-row.drop-before {
   border-top-color: var(--accent-2);
 }
@@ -291,6 +347,15 @@ h3 {
 .tree-row.drop-into {
   outline: 2px solid var(--accent-2);
   outline-offset: -2px;
+}
+
+.tree-row .handle {
+  flex: none;
+  width: 18px;
+  text-align: center;
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
 }
 
 .tree-row .twisty {
@@ -325,22 +390,37 @@ h3 {
   opacity: 0.6;
 }
 
-.tree-row .eye:hover {
-  opacity: 1;
-  background: none;
-}
-
 .outliner .root-drop {
-  min-height: 24px;
+  min-height: 32px;
+  border-top: 2px solid transparent;
 }
 
-/* ---------------- ビューポート ---------------- */
+.outliner .root-drop.drop-before {
+  border-top-color: var(--accent-2);
+}
+
+.drag-ghost {
+  position: fixed;
+  z-index: 100;
+  pointer-events: none;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  transform: translate(12px, -50%);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 40%);
+}
+
+/* ================================================================ ビューポート */
 
 .viewport {
   position: relative;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .viewport canvas {
@@ -368,8 +448,12 @@ h3 {
 .empty-hint {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-content: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 24px;
   text-align: center;
   line-height: 1.9;
   color: var(--muted);
@@ -377,19 +461,34 @@ h3 {
   font-size: 14px;
 }
 
-.empty-hint span {
+.empty-hint p {
+  margin: 0;
+}
+
+.empty-hint .gesture-hint {
   font-size: 12px;
+}
+
+.empty-hint button {
+  pointer-events: auto;
+  margin-top: 10px;
+  padding: 8px 16px;
 }
 
 .empty-hint.hidden {
   display: none;
 }
 
-/* ---------------- プロパティ ---------------- */
+/* ================================================================ プロパティ */
 
 .props-empty {
   color: var(--muted);
   line-height: 1.7;
+  margin-top: 6px;
+}
+
+#properties {
+  margin-top: 6px;
 }
 
 .field {
@@ -409,6 +508,7 @@ h3 {
 .scrub {
   cursor: ew-resize;
   user-select: none;
+  touch-action: none;
 }
 
 input[type='text'],
@@ -458,7 +558,7 @@ input:focus {
   left: 1px;
   top: 1px;
   bottom: 1px;
-  width: 16px;
+  width: 18px;
   display: grid;
   place-items: center;
   font-size: 10px;
@@ -478,7 +578,7 @@ input:focus {
 }
 
 .vec .axis input {
-  padding-left: 18px;
+  padding-left: 20px;
 }
 
 .range-row {
@@ -513,6 +613,8 @@ input[type='color'] {
 .swatches button {
   aspect-ratio: 1;
   padding: 0;
+  min-height: 0;
+  min-width: 0;
   border-radius: 3px;
   border: 1px solid rgb(255 255 255 / 15%);
 }
@@ -533,20 +635,13 @@ input[type='color'] {
   font-size: 11px;
 }
 
-.note {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.6;
-  margin: 4px 0 8px;
-}
-
-/* ---------------- ステータスバー / トースト ---------------- */
+/* ================================================================ ステータスバー / 通知 */
 
 .statusbar {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  padding: 4px 12px;
+  padding: 4px calc(12px + var(--safe-right)) calc(4px + var(--safe-bottom)) calc(12px + var(--safe-left));
   background: var(--panel);
   border-top: 1px solid var(--border);
   color: var(--muted);
@@ -563,7 +658,8 @@ input[type='color'] {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 40px;
+  bottom: calc(40px + var(--safe-bottom));
+  max-width: calc(100vw - 32px);
   transform: translate(-50%, 20px);
   background: #2d3240;
   border: 1px solid var(--border);
@@ -586,8 +682,8 @@ input[type='color'] {
 
 .update-banner {
   position: fixed;
-  right: 16px;
-  bottom: 36px;
+  right: calc(16px + var(--safe-right));
+  bottom: calc(36px + var(--safe-bottom));
   z-index: 60;
   display: flex;
   align-items: center;
@@ -599,41 +695,455 @@ input[type='color'] {
   box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
 }
 
-/* ---------------- 狭い画面 ---------------- */
+/* ================================================================ 表示切替ユーティリティ */
 
-@media (max-width: 900px) {
+/* PC レイアウト（タッチ主体の端末は iPad Pro 横向きまでタブレット扱い） */
+@media (min-width: 1400px), (min-width: 1100px) and (pointer: fine), (min-width: 1100px) and (pointer: none) {
+  .compact-only,
+  .compact-flex {
+    display: none !important;
+  }
+}
+
+@media (max-width: 1099px), (pointer: coarse) and (max-width: 1399px) {
+  .desktop-only,
+  .desktop-flex {
+    display: none !important;
+  }
+}
+
+/* ================================================================ タッチ操作向けの大きさ（iPad 横向きなど PC レイアウトでも適用） */
+
+@media (pointer: coarse) {
+  button,
+  summary {
+    min-height: 40px;
+    padding: 8px 12px;
+  }
+
+  .icon-btn {
+    min-width: 44px;
+    font-size: 18px;
+  }
+
+  /* iOS は 16px 未満の入力欄にフォーカスすると画面が拡大されるので 16px にする */
+  input[type='text'],
+  input[type='number'] {
+    font-size: 16px;
+    padding: 6px 8px;
+  }
+
+  input[type='color'] {
+    height: 40px;
+  }
+
+  input[type='range'] {
+    height: 32px;
+  }
+
+  input[type='checkbox'] {
+    width: 22px;
+    height: 22px;
+  }
+
+  .checkbox {
+    min-height: 36px;
+  }
+
+  .field {
+    margin-bottom: 10px;
+  }
+
+  .tree-row {
+    min-height: 44px;
+    padding: 4px 8px;
+  }
+
+  .tree-row .handle {
+    width: 32px;
+    font-size: 18px;
+  }
+
+  .tree-row .twisty {
+    width: 24px;
+    font-size: 16px;
+  }
+
+  .tree-row .eye {
+    min-height: 40px;
+    min-width: 40px;
+    padding: 0;
+    font-size: 16px;
+  }
+
+  .palette button {
+    padding: 12px 2px 10px;
+    font-size: 12px;
+  }
+
+  .palette .icon {
+    font-size: 26px;
+  }
+
+  .swatches {
+    grid-template-columns: repeat(auto-fill, minmax(30px, 1fr));
+    gap: 6px;
+    margin-left: 0;
+  }
+
+  .view-buttons button {
+    min-height: 36px;
+  }
+}
+
+/* ================================================================ タブレット・スマホ共通（コンパクトレイアウト） */
+
+@media (max-width: 1099px), (pointer: coarse) and (max-width: 1399px) {
+  .toolbar {
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+
   .layout {
     grid-template-columns: 1fr;
-    grid-template-rows: 55vh auto auto;
-    overflow-y: auto;
-  }
-
-  body {
-    overflow: auto;
-  }
-
-  html,
-  body {
-    height: auto;
-    min-height: 100%;
   }
 
   .viewport {
-    order: -1;
-    height: 55vh;
+    grid-column: 1;
+    grid-row: 1;
   }
 
-  .panel.left,
-  .panel.right {
-    border: none;
-    border-top: 1px solid var(--border);
+  /* パネルはビューポートの上に浮かぶシートにする */
+  .panel {
+    position: absolute;
+    z-index: 30;
+    visibility: hidden;
+    transition:
+      transform 0.22s ease,
+      visibility 0.22s;
+    box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
+    border: 1px solid var(--border);
+  }
+
+  .panel.left {
+    gap: 0;
+  }
+
+  .sheet-section {
+    display: none;
+  }
+
+  body[data-sheet='add'] [data-section='add'],
+  body[data-sheet='tree'] [data-section='tree'],
+  body[data-sheet='props'] [data-section='props'],
+  body[data-sheet='menu'] [data-section='menu'] {
+    display: flex;
+    flex-direction: column;
+  }
+
+  body[data-sheet='add'] .panel.left,
+  body[data-sheet='tree'] .panel.left,
+  body[data-sheet='props'] .panel.right,
+  body[data-sheet='menu'] .menu-panel {
+    visibility: visible;
+    transform: none;
+  }
+
+  .panel.left .grow {
+    flex: 1;
   }
 
   .outliner {
-    max-height: 240px;
+    min-height: 200px;
   }
 
-  .statusbar .keys {
+  .menu-panel h3:first-of-type {
+    border-top: none;
+    padding-top: 0;
+  }
+
+  .menu-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+
+  .menu-grid button {
+    text-align: left;
+  }
+
+  /* 左上の変形モード切替 */
+  .mode-rail {
+    position: absolute;
+    top: 8px;
+    left: calc(8px + var(--safe-left));
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .mode-rail button,
+  .bottom-nav button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    line-height: 1.1;
+  }
+
+  .mode-rail button {
+    width: 52px;
+    height: 52px;
+    padding: 0;
+    background: rgb(32 35 43 / 88%);
+  }
+
+  .mode-rail button.active {
+    background: var(--accent);
+  }
+
+  .mode-rail span {
+    font-size: 18px;
+  }
+
+  .mode-rail small {
+    font-size: 10px;
+  }
+
+  /* 選択中だけ下に出る操作ボタン */
+  .action-bar {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    z-index: 6;
+    display: flex;
+    gap: 6px;
+    padding: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    background: rgb(32 35 43 / 92%);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 6px 20px rgb(0 0 0 / 35%);
+  }
+
+  .action-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .action-bar button {
+    flex: none;
+  }
+
+  body:not(.has-selection) .action-bar {
+    display: none;
+  }
+
+  /* 下のタブバー */
+  .bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    padding: 6px calc(8px + var(--safe-right)) calc(6px + var(--safe-bottom)) calc(8px + var(--safe-left));
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+  }
+
+  .bottom-nav button {
+    border: none;
+    background: transparent;
+    min-height: 48px;
+    color: var(--muted);
+  }
+
+  .bottom-nav button span {
+    font-size: 20px;
+  }
+
+  .bottom-nav button small {
+    font-size: 11px;
+  }
+
+  .bottom-nav button.active {
+    color: var(--accent);
+    background: rgb(79 140 255 / 14%);
+  }
+
+  .toast {
+    bottom: calc(80px + var(--safe-bottom));
+  }
+
+  body.has-selection .toast {
+    bottom: calc(140px + var(--safe-bottom));
+  }
+
+  .update-banner {
+    left: 12px;
+    right: 12px;
+    bottom: calc(76px + var(--safe-bottom));
+    justify-content: flex-end;
+  }
+
+  .update-banner span {
+    margin-right: auto;
+  }
+}
+
+/* ---------------- タブレット（左右から出るパネル） */
+
+@media (min-width: 700px) and (max-width: 1099px), (pointer: coarse) and (min-width: 700px) and (max-width: 1399px) {
+  .panel {
+    top: 8px;
+    bottom: 8px;
+    width: 320px;
+    border-radius: 12px;
+  }
+
+  .panel.left {
+    left: calc(8px + var(--safe-left));
+    transform: translateX(calc(-100% - 20px));
+  }
+
+  .panel.right,
+  .menu-panel {
+    right: calc(8px + var(--safe-right));
+    transform: translateX(calc(100% + 20px));
+  }
+
+  /* 左パネルが開いている間はモード切替をパネルの右へずらす */
+  body[data-sheet='add'] .mode-rail,
+  body[data-sheet='tree'] .mode-rail {
+    left: calc(340px + var(--safe-left));
+  }
+
+  body[data-sheet='props'] .view-buttons,
+  body[data-sheet='menu'] .view-buttons {
+    right: 340px;
+  }
+
+  body[data-sheet='add'] .action-bar,
+  body[data-sheet='tree'] .action-bar {
+    left: 340px;
+  }
+
+  body[data-sheet='props'] .action-bar,
+  body[data-sheet='menu'] .action-bar {
+    right: 340px;
+  }
+}
+
+/* ---------------- スマホ（画面を上下に分割：上が 3D 画面、下が開いたパネル） */
+
+@media (max-width: 699px) {
+  .brand-name {
+    font-size: 14px;
+  }
+
+  /* パネルを開いても 3D 画面が隠れないよう、重ねずに画面を分ける */
+  .layout {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .viewport {
+    flex: 1 1 0;
+    min-height: 150px;
+  }
+
+  .panel,
+  .panel.left {
+    position: static;
+    display: none;
+    flex: none;
+    visibility: visible;
+    transform: none;
+    transition: none;
+    max-height: 56%;
+    padding: 8px calc(14px + var(--safe-right)) 14px calc(14px + var(--safe-left));
+    border-radius: 16px 16px 0 0;
+    border-width: 1px 0 0;
+    box-shadow: 0 -6px 20px rgb(0 0 0 / 35%);
+  }
+
+  body[data-sheet='add'] .panel.left,
+  body[data-sheet='tree'] .panel.left,
+  body[data-sheet='props'] .panel.right,
+  body[data-sheet='menu'] .menu-panel {
+    display: flex;
+    flex-direction: column;
+  }
+
+  body[data-sheet='tree'] .panel.left {
+    height: 50%;
+  }
+
+  /* シート上端のつまみ */
+  .panel::before {
+    content: '';
+    display: block;
+    width: 40px;
+    height: 4px;
+    margin: 0 auto 6px;
+    border-radius: 2px;
+    background: #4b5264;
+    flex: none;
+  }
+
+  /* パネルを開いている間は 3D 画面が狭いので、ボタン類を小さくまとめる */
+  body[data-sheet] .action-bar {
+    display: none;
+  }
+
+  body[data-sheet] .mode-rail {
+    flex-direction: row;
+  }
+
+  body[data-sheet] .mode-rail button {
+    width: 40px;
+    height: 40px;
+    min-height: 0;
+  }
+
+  body[data-sheet] .mode-rail small,
+  body[data-sheet] .view-buttons {
+    display: none;
+  }
+
+  .view-buttons {
+    right: calc(8px + var(--safe-right));
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: calc(100% - 80px);
+  }
+
+  .view-buttons button {
+    padding: 6px 8px;
+  }
+
+  .palette {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .field {
+    grid-template-columns: 84px 1fr;
+  }
+
+  .swatches {
+    margin-left: 0;
+  }
+
+  .toast,
+  body.has-selection .toast {
+    bottom: calc(80px + var(--safe-bottom));
+  }
+}
+
+@media (max-width: 380px) {
+  .brand-name {
     display: none;
   }
 }

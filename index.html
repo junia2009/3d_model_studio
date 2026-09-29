@@ -2,9 +2,10 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="部品を組み合わせて 3D モデルを作れるブラウザスタジオ" />
     <meta name="theme-color" content="#20232b" />
+    <meta name="format-detection" content="telephone=no" />
     <title>3D Model Studio</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
@@ -17,10 +18,19 @@
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
+    <!--
+      画面構成
+      - PC（横幅 1100px 以上）: 上のツールバー + 左パネル / ビューポート / 右パネル の 3 列
+      - タブレット: ビューポート全面 + 左右から出るパネル + 下のタブバー
+      - スマホ: ビューポート全面 + 下から出るシート + 下のタブバー
+    -->
     <header class="toolbar">
-      <div class="brand"><img src="./icons/icon.svg" alt="" width="20" height="20" /> 3D Model Studio</div>
+      <div class="brand">
+        <img src="./icons/icon.svg" alt="" width="22" height="22" />
+        <span class="brand-name">3D Model Studio</span>
+      </div>
 
-      <div class="tool-group" aria-label="ファイル">
+      <div class="tool-group desktop-only" aria-label="ファイル">
         <button data-action="new" title="新規作成">新規</button>
         <button data-action="open" title="JSON ファイルを開く (Ctrl+O)">開く</button>
         <button data-action="save" title="JSON ファイルとして保存 (Ctrl+S)">保存</button>
@@ -38,19 +48,20 @@
       </div>
 
       <div class="tool-group" aria-label="履歴">
-        <button data-action="undo" title="元に戻す (Ctrl+Z)">↶</button>
-        <button data-action="redo" title="やり直し (Ctrl+Shift+Z / Ctrl+Y)">↷</button>
+        <button data-action="undo" class="icon-btn" title="元に戻す (Ctrl+Z)" aria-label="元に戻す">↶</button>
+        <button data-action="redo" class="icon-btn" title="やり直し (Ctrl+Shift+Z / Ctrl+Y)" aria-label="やり直し">↷</button>
       </div>
 
-      <div class="tool-group" aria-label="変形モード">
+      <div class="tool-group desktop-only" aria-label="変形モード">
         <button data-mode="translate" title="移動 (W)">✥ 移動</button>
         <button data-mode="rotate" title="回転 (E)">⟳ 回転</button>
         <button data-mode="scale" title="拡大縮小 (R)">⤢ 拡縮</button>
         <button data-action="space" title="ローカル / ワールド座標の切替 (Q)">ワールド</button>
         <button data-action="snap" title="スナップ ON/OFF (X)">スナップ</button>
+        <button data-action="multi" title="タップで選択を追加・解除する（Shift+クリックと同じ）">複数選択</button>
       </div>
 
-      <div class="tool-group" aria-label="編集">
+      <div class="tool-group desktop-only" aria-label="編集">
         <button data-action="duplicate" title="複製 (Ctrl+D)">複製</button>
         <button data-action="mirror" title="左右反転してコピー (M)">反転コピー</button>
         <button data-action="group" title="グループ化 (Ctrl+G)">グループ化</button>
@@ -61,49 +72,130 @@
 
       <div class="tool-group pwa-group">
         <span id="offline-badge" class="offline-badge" hidden title="オフラインでも作業・保存・書き出しはできます">オフライン</span>
-        <button id="install-button" class="install" hidden title="アプリとしてインストール">⬇ インストール</button>
+        <button data-install class="install desktop-only" hidden title="アプリとしてインストール">⬇ インストール</button>
       </div>
     </header>
 
     <div class="layout">
-      <aside class="panel left">
-        <section>
-          <h2>部品</h2>
-          <p class="hint">クリックで追加</p>
+      <aside class="panel left" aria-label="部品と一覧">
+        <section class="sheet-section" data-section="add">
+          <div class="sheet-head">
+            <h2>部品</h2>
+            <button class="sheet-close compact-only" data-sheet-close aria-label="閉じる">✕</button>
+          </div>
+          <p class="hint"><span class="desktop-only">クリック</span><span class="compact-only">タップ</span>で追加</p>
           <div id="palette" class="palette"></div>
         </section>
-        <section class="grow">
-          <h2>アウトライナー</h2>
-          <p class="hint">ドラッグでグループに出し入れ・並べ替え</p>
+        <section class="sheet-section grow" data-section="tree">
+          <div class="sheet-head">
+            <h2>一覧（アウトライナー）</h2>
+            <button class="sheet-close compact-only" data-sheet-close aria-label="閉じる">✕</button>
+          </div>
+          <p class="hint">⠿ をドラッグしてグループに出し入れ・並べ替え</p>
           <div id="outliner" class="outliner"></div>
         </section>
       </aside>
 
       <main class="viewport" id="viewport">
+        <!-- タッチ端末・小さい画面用の変形モード切替 -->
+        <div class="mode-rail compact-flex" aria-label="変形モード">
+          <button data-mode="translate" title="移動"><span>✥</span><small>移動</small></button>
+          <button data-mode="rotate" title="回転"><span>⟳</span><small>回転</small></button>
+          <button data-mode="scale" title="拡大縮小"><span>⤢</span><small>拡縮</small></button>
+          <button data-action="multi" title="タップで選択を追加・解除する"><span>⧉</span><small>複数</small></button>
+        </div>
+
         <div class="view-buttons">
           <button data-view="front" title="正面">正面</button>
           <button data-view="right" title="右">右</button>
           <button data-view="top" title="上">上</button>
           <button data-view="iso" title="斜め">斜め</button>
           <button data-action="focus" title="選択物にズーム (F)">フォーカス</button>
-          <button data-action="grid" title="グリッド表示切替">グリッド</button>
+          <button data-action="grid" class="desktop-only" title="グリッド表示切替">グリッド</button>
         </div>
+
         <div class="empty-hint" id="empty-hint">
-          左の「部品」から形を追加して、組み合わせてモデルを作りましょう。<br />
-          <span>または上の「サンプル」を開いてみてください。</span>
+          <p>
+            <span class="desktop-only">左の</span>「部品」から形を追加して、<br />
+            組み合わせてモデルを作りましょう。
+          </p>
+          <p class="gesture-hint compact-only">1 本指: 回転 ／ 2 本指: 移動・ズーム ／ タップ: 選択</p>
+          <button data-action="sample">サンプルを開いてみる</button>
+        </div>
+
+        <!-- 選択中のみ出る編集ボタン（タブレット・スマホ） -->
+        <div class="action-bar compact-flex" aria-label="選択した部品の操作">
+          <button data-action="duplicate">⧉ 複製</button>
+          <button data-action="mirror">⇋ 反転コピー</button>
+          <button data-action="ground">⤓ 床に置く</button>
+          <button data-action="group">▣ グループ化</button>
+          <button data-action="ungroup">▢ 解除</button>
+          <button data-action="deselect">選択解除</button>
+          <button data-action="delete" class="danger">🗑 削除</button>
         </div>
       </main>
 
-      <aside class="panel right">
-        <h2>プロパティ</h2>
-        <div id="properties"></div>
+      <aside class="panel right" aria-label="プロパティ">
+        <section class="sheet-section" data-section="props">
+          <div class="sheet-head">
+            <h2>プロパティ</h2>
+            <button class="sheet-close compact-only" data-sheet-close aria-label="閉じる">✕</button>
+          </div>
+          <div id="properties"></div>
+        </section>
+      </aside>
+
+      <!-- タブレット・スマホ用メニュー（PC ではツールバーにある機能） -->
+      <aside class="panel menu-panel compact-only" aria-label="メニュー">
+        <section class="sheet-section" data-section="menu">
+          <div class="sheet-head">
+            <h2>メニュー</h2>
+            <button class="sheet-close" data-sheet-close aria-label="閉じる">✕</button>
+          </div>
+          <h3>ファイル</h3>
+          <div class="menu-grid">
+            <button data-action="new">📄 新規</button>
+            <button data-action="open">📂 開く</button>
+            <button data-action="save">💾 保存</button>
+            <button data-action="sample">🤖 サンプル</button>
+          </div>
+          <h3>書き出し</h3>
+          <div class="menu-grid">
+            <button data-export="glb">GLB</button>
+            <button data-export="gltf">glTF</button>
+            <button data-export="obj">OBJ</button>
+            <button data-export="stl">STL（3D プリント）</button>
+            <button data-export="png">画像 (PNG)</button>
+          </div>
+          <h3>操作</h3>
+          <div class="menu-grid">
+            <button data-action="snap">スナップ</button>
+            <button data-action="space">ワールド</button>
+            <button data-action="grid">グリッド</button>
+            <button data-action="selectAll">すべて選択</button>
+          </div>
+          <div class="menu-grid">
+            <button data-install class="install" hidden>⬇ アプリとしてインストール</button>
+          </div>
+          <p class="note ios-install-note" hidden>
+            iPhone / iPad では Safari の共有ボタン →「ホーム画面に追加」でアプリとして使えます。
+          </p>
+        </section>
       </aside>
     </div>
 
-    <footer class="statusbar">
+    <!-- タブレット・スマホ用の下のタブバー -->
+    <nav class="bottom-nav compact-flex" aria-label="パネル切替">
+      <button data-sheet="add"><span>＋</span><small>部品</small></button>
+      <button data-sheet="tree"><span>☰</span><small>一覧</small></button>
+      <button data-sheet="props"><span>⚙</span><small>調整</small></button>
+      <button data-sheet="menu"><span>⋯</span><small>メニュー</small></button>
+    </nav>
+
+    <footer class="statusbar desktop-flex">
       <span id="status">準備完了</span>
       <span class="keys">
-        左ドラッグ: 回転 ／ 右ドラッグ: 平行移動 ／ ホイール: ズーム ／ Shift+クリック: 複数選択 ／ Alt+クリック: グループ内の部品を選択
+        左ドラッグ: 回転 ／ 右ドラッグ: 平行移動 ／ ホイール: ズーム ／ Shift+クリック: 複数選択 ／ ダブルクリック: グループ内の部品を選択
       </span>
     </footer>
 

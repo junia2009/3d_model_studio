@@ -23,14 +23,61 @@ function toast(message, { error = false } = {}) {
   toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
 }
 
-function download(blob, filename) {
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+/**
+ * ファイルを保存する。
+ * iPhone / iPad（特にホーム画面から開いたアプリ）ではダウンロードが使いにくいので、
+ * 共有シート（「ファイルに保存」など）を優先する。
+ */
+async function saveFile(blob, filename) {
+  if (isIOS && navigator.canShare) {
+    const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
+    if (navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file] });
+        return true;
+      } catch (err) {
+        if (err.name === 'AbortError') return false; // ユーザーがキャンセル
+        // 共有できなかった場合は通常のダウンロードにフォールバック
+      }
+    }
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return true;
 }
+
+// ---------------------------------------------------------------- シート（タブレット・スマホのパネル）
+
+// style.css のコンパクトレイアウトと同じ条件
+const compactQuery = window.matchMedia('(max-width: 1099px), (pointer: coarse) and (max-width: 1399px)');
+const phoneQuery = window.matchMedia('(max-width: 699px)');
+
+function setSheet(name) {
+  if (name) document.body.dataset.sheet = name;
+  else delete document.body.dataset.sheet;
+  for (const btn of $$('[data-sheet]')) btn.classList.toggle('active', btn.dataset.sheet === name);
+}
+
+for (const btn of $$('[data-sheet]')) {
+  btn.addEventListener('click', () => setSheet(document.body.dataset.sheet === btn.dataset.sheet ? null : btn.dataset.sheet));
+}
+for (const btn of $$('[data-sheet-close]')) btn.addEventListener('click', () => setSheet(null));
+// PC レイアウトに戻ったらシートの状態は不要
+compactQuery.addEventListener('change', () => setSheet(null));
+
+// スマホでは部品を追加したらシートを閉じて、追加した部品が見えるようにする
+$('#palette').addEventListener('click', (e) => {
+  if (phoneQuery.matches && e.target.closest('button')) setSheet(null);
+});
+
+// iOS Safari のピンチでページ全体が拡大されるのを防ぐ（3D 画面のピンチはズームに使う）
+document.addEventListener('gesturestart', (e) => e.preventDefault());
 
 // ---------------------------------------------------------------- 操作
 
@@ -41,21 +88,26 @@ const actions = {
     toast('新規作成しました');
   },
   open: () => $('#file-input').click(),
-  save: () => {
+  save: async () => {
     const json = JSON.stringify(editor.getSceneData(), null, 2);
-    download(new Blob([json], { type: 'application/json' }), 'model.studio.json');
-    toast('保存しました（model.studio.json）');
+    if (await saveFile(new Blob([json], { type: 'application/json' }), 'model.studio.json')) {
+      toast('保存しました（model.studio.json）');
+    }
   },
   sample: () => {
     if (editor.modelRoot.children.length && !confirm('今のモデルを消してサンプルを開きますか？')) return;
     editor.loadScene(sampleScene());
     editor.focusSelected();
+    setSheet(null);
     toast('サンプルを読み込みました');
   },
   undo: () => editor.undo(),
   redo: () => editor.redo(),
   space: () => editor.toggleSpace(),
   snap: () => editor.setSnap(!editor.snapEnabled),
+  multi: () => editor.setMultiSelect(!editor.multiSelect),
+  selectAll: () => editor.selectAll(),
+  deselect: () => editor.select([]),
   duplicate: () => editor.duplicateSelected(),
   mirror: () => editor.mirrorDuplicate('x'),
   group: () => editor.groupSelected(),
@@ -65,7 +117,7 @@ const actions = {
   focus: () => editor.focusSelected(),
   grid: () => {
     editor.setHelpersVisible(!editor.helpers.visible);
-    $('[data-action="grid"]').classList.toggle('active', editor.helpers.visible);
+    updateButtons();
   },
 };
 
@@ -75,19 +127,21 @@ for (const btn of $$('[data-view]')) btn.addEventListener('click', () => editor.
 
 for (const btn of $$('[data-export]')) {
   btn.addEventListener('click', async () => {
-    btn.closest('details').open = false;
+    const details = btn.closest('details');
+    if (details) details.open = false;
     const format = btn.dataset.export;
     try {
+      let blob;
       if (format === 'png') {
-        download(await editor.screenshot(), 'model.png');
+        blob = await editor.screenshot();
       } else {
         if (!editor.modelRoot.children.length) {
           toast('書き出す部品がありません', { error: true });
           return;
         }
-        download(await editor.exportModel(format), `model.${format}`);
+        blob = await editor.exportModel(format);
       }
-      toast(`${format.toUpperCase()} で書き出しました`);
+      if (await saveFile(blob, `model.${format}`)) toast(`${format.toUpperCase()} で書き出しました`);
     } catch (err) {
       console.error(err);
       toast(`書き出しに失敗しました: ${err.message}`, { error: true });
@@ -119,16 +173,25 @@ $('#file-input').addEventListener('change', async (e) => {
 function updateButtons() {
   const hasSel = editor.selected.length > 0;
   const hasGroup = editor.selected.some((o) => o.userData.kind === 'group');
-  $('[data-action="undo"]').disabled = !editor.history.canUndo;
-  $('[data-action="redo"]').disabled = !editor.history.canRedo;
-  for (const a of ['duplicate', 'mirror', 'group', 'ground', 'delete']) $(`[data-action="${a}"]`).disabled = !hasSel;
-  $('[data-action="ungroup"]').disabled = !hasGroup;
+  const setDisabled = (action, disabled) => {
+    for (const b of $$(`[data-action="${action}"]`)) b.disabled = disabled;
+  };
+  const setActive = (action, active) => {
+    for (const b of $$(`[data-action="${action}"]`)) b.classList.toggle('active', active);
+  };
+
+  setDisabled('undo', !editor.history.canUndo);
+  setDisabled('redo', !editor.history.canRedo);
+  for (const a of ['duplicate', 'mirror', 'group', 'ground', 'delete', 'deselect']) setDisabled(a, !hasSel);
+  setDisabled('ungroup', !hasGroup);
 
   for (const btn of $$('[data-mode]')) btn.classList.toggle('active', btn.dataset.mode === editor.transform.mode);
-  $('[data-action="space"]').textContent = editor.transform.space === 'local' ? 'ローカル' : 'ワールド';
-  $('[data-action="snap"]').classList.toggle('active', editor.snapEnabled);
-  $('[data-action="grid"]').classList.toggle('active', editor.helpers.visible);
+  for (const b of $$('[data-action="space"]')) b.textContent = editor.transform.space === 'local' ? 'ローカル座標' : 'ワールド座標';
+  setActive('snap', editor.snapEnabled);
+  setActive('grid', editor.helpers.visible);
+  setActive('multi', editor.multiSelect);
 
+  document.body.classList.toggle('has-selection', hasSel);
   $('#empty-hint').classList.toggle('hidden', editor.modelRoot.children.length > 0);
 
   const n = editor.selected.length;
@@ -188,7 +251,10 @@ window.addEventListener('keydown', (e) => {
     case 'backspace':
       return run(actions.delete);
     case 'escape':
-      return run(() => editor.select([]));
+      return run(() => {
+        if (document.body.dataset.sheet) setSheet(null);
+        else editor.select([]);
+      });
     default:
   }
 });
@@ -200,7 +266,7 @@ if (editor.restoreAutosave()) {
   toast('前回の作業を復元しました');
 }
 updateButtons();
-initPWA();
+initPWA({ isIOS });
 
 // デバッグ・自動テスト用
 window.studio = editor;

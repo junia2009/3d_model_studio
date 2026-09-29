@@ -2,8 +2,11 @@
  * PWA 関連：Service Worker の登録、更新の通知、インストールボタン、オフライン表示。
  * Service Worker はビルド時にしか生成されないので、開発サーバーでは登録しない。
  */
-export function initPWA() {
+export function initPWA({ isIOS = false } = {}) {
   initInstallButton();
+  // iOS には beforeinstallprompt がないので、Safari で開いているときは手順を案内する
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  if (isIOS && !standalone) document.querySelector('.ios-install-note').hidden = false;
   initOnlineStatus();
   if (import.meta.env.PROD && 'serviceWorker' in navigator) registerServiceWorker();
 }
@@ -47,24 +50,27 @@ function showUpdateBanner(worker) {
 }
 
 function initInstallButton() {
-  const button = document.querySelector('#install-button');
+  const buttons = [...document.querySelectorAll('[data-install]')];
   let deferred = null;
+  const show = (visible) => buttons.forEach((b) => (b.hidden = !visible));
 
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferred = e;
-    button.hidden = false;
+    show(true);
   });
-  button.addEventListener('click', async () => {
-    if (!deferred) return;
-    deferred.prompt();
-    await deferred.userChoice;
-    deferred = null;
-    button.hidden = true;
-  });
+  for (const button of buttons) {
+    button.addEventListener('click', async () => {
+      if (!deferred) return;
+      deferred.prompt();
+      await deferred.userChoice;
+      deferred = null;
+      show(false);
+    });
+  }
   window.addEventListener('appinstalled', () => {
     deferred = null;
-    button.hidden = true;
+    show(false);
   });
 }
 

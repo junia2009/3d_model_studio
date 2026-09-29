@@ -46,7 +46,6 @@ export function initPalette(container, editor) {
 
 export function initOutliner(container, editor) {
   const collapsed = new Set();
-  let dragged = null;
 
   const render = () => {
     container.replaceChildren();
@@ -56,15 +55,7 @@ export function initOutliner(container, editor) {
     }
     for (const o of roots) addRow(o, 0);
     // 一番下の余白：ここにドロップするとトップレベルの末尾へ移動
-    const rootDrop = el('div', { class: 'root-drop' });
-    rootDrop.addEventListener('dragover', (e) => {
-      if (dragged) e.preventDefault();
-    });
-    rootDrop.addEventListener('drop', (e) => {
-      e.preventDefault();
-      if (dragged) editor.reparent(dragged, editor.modelRoot);
-    });
-    container.append(rootDrop);
+    container.append(el('div', { class: 'root-drop' }));
     updateSelection();
   };
 
@@ -74,20 +65,22 @@ export function initOutliner(container, editor) {
     const isCollapsed = collapsed.has(obj.userData.id);
 
     const name = el('span', { class: 'name', title: 'ダブルクリックで名前を変更' }, obj.name || '(名前なし)');
+    const handle = el('span', { class: 'handle', title: 'ドラッグで移動', 'aria-hidden': 'true' }, '⠿');
     const row = el(
       'div',
       {
         class: `tree-row${obj.visible ? '' : ' hidden-obj'}`,
-        draggable: 'true',
         dataset: { id: obj.userData.id },
-        style: `padding-left:${6 + depth * 14}px`,
+        style: `padding-left:${4 + depth * 16}px`,
       },
+      handle,
       el(
         'span',
         {
           class: 'twisty',
           onclick: (e) => {
             e.stopPropagation();
+            if (!hasChildren) return;
             if (isCollapsed) collapsed.delete(obj.userData.id);
             else collapsed.add(obj.userData.id);
             render();
@@ -102,6 +95,7 @@ export function initOutliner(container, editor) {
         {
           class: 'eye',
           title: obj.visible ? '非表示にする' : '表示する',
+          'aria-label': obj.visible ? '非表示にする' : '表示する',
           onclick: (e) => {
             e.stopPropagation();
             editor.setVisible(obj, !obj.visible);
@@ -112,36 +106,13 @@ export function initOutliner(container, editor) {
     );
 
     row.addEventListener('click', (e) => {
-      editor.select([obj], { toggle: e.shiftKey || e.ctrlKey || e.metaKey });
+      editor.select([obj], { toggle: e.shiftKey || e.ctrlKey || e.metaKey || editor.multiSelect });
     });
     name.addEventListener('dblclick', (e) => {
       e.stopPropagation();
       startRename(name, obj);
     });
-
-    // ---- ドラッグ＆ドロップ
-    row.addEventListener('dragstart', (e) => {
-      dragged = obj;
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', obj.userData.id);
-    });
-    row.addEventListener('dragend', () => {
-      dragged = null;
-      clearDropMarks();
-    });
-    row.addEventListener('dragover', (e) => {
-      if (!dragged || dragged === obj) return;
-      e.preventDefault();
-      clearDropMarks();
-      row.classList.add(dropZone(e, row, isGroup) === 'into' ? 'drop-into' : 'drop-before');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('drop-into', 'drop-before'));
-    row.addEventListener('drop', (e) => {
-      e.preventDefault();
-      if (!dragged || dragged === obj) return;
-      if (dropZone(e, row, isGroup) === 'into') editor.reparent(dragged, obj);
-      else editor.reparent(dragged, obj.parent, obj);
-    });
+    enableDrag(handle, row, obj);
 
     container.append(row);
     if (hasChildren && !isCollapsed) {
@@ -149,11 +120,72 @@ export function initOutliner(container, editor) {
     }
   };
 
-  // グループ行の下 2/3 にドロップすると「中へ」、上 1/3 なら「前へ」
-  const dropZone = (e, row, isGroup) => {
-    if (!isGroup) return 'before';
-    const rect = row.getBoundingClientRect();
-    return e.clientY - rect.top > rect.height / 3 ? 'into' : 'before';
+  /**
+   * ⠿ ハンドルからのドラッグ＆ドロップ。
+   * HTML5 の Drag and Drop は iPhone / iPad のタッチで動かないため、Pointer Events で自前実装する。
+   */
+  const enableDrag = (handle, row, obj) => {
+    handle.addEventListener('click', (e) => e.stopPropagation());
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      handle.setPointerCapture(e.pointerId);
+      const start = { x: e.clientX, y: e.clientY };
+      let ghost = null;
+      let drop = null;
+      let scrollTimer = null;
+
+      const move = (ev) => {
+        if (!ghost) {
+          if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 5) return;
+          ghost = el('div', { class: 'drag-ghost' }, obj.name);
+          document.body.append(ghost);
+          row.classList.add('dragging');
+        }
+        ghost.style.left = `${ev.clientX}px`;
+        ghost.style.top = `${ev.clientY}px`;
+        drop = findDrop(ev.clientX, ev.clientY, obj);
+        clearDropMarks();
+        drop?.el.classList.add(drop.zone === 'into' ? 'drop-into' : 'drop-before');
+
+        // 端に来たら自動スクロール
+        clearInterval(scrollTimer);
+        const rect = container.getBoundingClientRect();
+        const dir = ev.clientY < rect.top + 28 ? -1 : ev.clientY > rect.bottom - 28 ? 1 : 0;
+        if (dir) scrollTimer = setInterval(() => (container.scrollTop += dir * 8), 16);
+      };
+      const end = (ev) => {
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', end);
+        handle.removeEventListener('pointercancel', end);
+        clearInterval(scrollTimer);
+        ghost?.remove();
+        row.classList.remove('dragging');
+        clearDropMarks();
+        if (!ghost || ev.type === 'pointercancel' || !drop) return;
+        if (drop.zone === 'root') editor.reparent(obj, editor.modelRoot);
+        else if (drop.zone === 'into') editor.reparent(obj, drop.target);
+        else editor.reparent(obj, drop.target.parent, drop.target);
+      };
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', end);
+      handle.addEventListener('pointercancel', end);
+    });
+  };
+
+  /** 指 / マウスの位置からドロップ先を求める。グループ行の下 2/3 なら「中へ」、それ以外は「前へ」 */
+  const findDrop = (x, y, dragged) => {
+    const target = document.elementFromPoint(x, y)?.closest('.tree-row, .root-drop');
+    if (!target || !container.contains(target)) return null;
+    if (target.classList.contains('root-drop')) return { el: target, zone: 'root' };
+    const obj = editor.findById(target.dataset.id);
+    if (!obj || obj === dragged) return null;
+    // 自分の子孫の中には入れられない
+    for (let p = obj; p; p = p.parent) if (p === dragged) return null;
+    const rect = target.getBoundingClientRect();
+    const into = obj.userData.kind === 'group' && y - rect.top > rect.height / 3;
+    return { el: target, target: obj, zone: into ? 'into' : 'before' };
   };
 
   const clearDropMarks = () => {
@@ -231,7 +263,7 @@ export function initProperties(container, editor) {
           { class: 'props-empty' },
           '何も選択されていません。',
           el('br'),
-          'ビューポートかアウトライナーで部品をクリックすると、ここで位置・大きさ・色などを編集できます。',
+          '3D 画面か一覧で部品をクリック（タップ）すると、ここで位置・大きさ・色などを編集できます。',
         ),
       );
       return;

@@ -43,6 +43,7 @@ export class Editor extends EventTarget {
     this.selected = [];
     this.history = new History();
     this.snapEnabled = false;
+    this.multiSelect = false;
     this._multiStart = null;
 
     this._initRenderer();
@@ -124,16 +125,21 @@ export class Editor extends EventTarget {
   }
 
   _initControls() {
+    // タッチ端末では指で掴みやすいようにギズモを大きくする
+    this.isTouch = window.matchMedia('(pointer: coarse)').matches;
+
+    // TransformControls を先に作り、ポインターイベントを OrbitControls より先に受け取らせる。
+    // ギズモを掴んだ瞬間に視点操作が無効になり、指でのドラッグで視点が一緒に動かない。
+    const transform = new TransformControls(this.camera, this.renderer.domElement);
+    transform.setSize(this.isTouch ? 1.35 : 0.9);
+    this.transform = transform;
+    this.scene.add(transform.getHelper());
+
     this.orbit = new OrbitControls(this.camera, this.renderer.domElement);
     this.orbit.enableDamping = true;
     this.orbit.dampingFactor = 0.12;
     this.orbit.target.set(0, 0.5, 0);
     this.orbit.update();
-
-    const transform = new TransformControls(this.camera, this.renderer.domElement);
-    transform.setSize(0.9);
-    this.transform = transform;
-    this.scene.add(transform.getHelper());
 
     transform.addEventListener('dragging-changed', (e) => {
       this.orbit.enabled = !e.value;
@@ -153,40 +159,73 @@ export class Editor extends EventTarget {
     });
   }
 
+  /**
+   * クリック / タップでの選択。
+   * - 指やマウスがほとんど動いていないときだけ選択（視点操作と区別）
+   * - 2 本指以上で触れたジェスチャーでは選択しない
+   * - ダブルクリック / ダブルタップでグループの中の部品を直接選ぶ
+   */
   _initPicking() {
     const el = this.renderer.domElement;
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
-    let down = null;
+    const active = new Map();
+    let multiTouch = false;
+    let lastTap = null;
 
     el.addEventListener('pointerdown', (e) => {
       // TransformControls のリスナーが先に走るので、ギズモ上かどうかは axis で分かる
-      down = { x: e.clientX, y: e.clientY, onGizmo: this.transform.axis !== null };
+      active.set(e.pointerId, { x: e.clientX, y: e.clientY, onGizmo: this.transform.axis !== null });
+      if (active.size > 1) multiTouch = true;
     });
+    const release = (e) => {
+      const down = active.get(e.pointerId);
+      active.delete(e.pointerId);
+      const wasMulti = multiTouch;
+      if (active.size === 0) multiTouch = false;
+      return wasMulti ? null : down;
+    };
+    el.addEventListener('pointercancel', release);
     el.addEventListener('pointerup', (e) => {
+      const down = release(e);
       if (!down || e.button !== 0) return;
       const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
-      const onGizmo = down.onGizmo;
-      down = null;
+      const tolerance = e.pointerType === 'mouse' ? 4 : 12;
       // ドラッグ（視点移動）やギズモ操作のときは選択しない
-      if (moved > 4 || onGizmo || this._dragMoved) {
+      if (moved > tolerance || this._dragMoved) {
         this._dragMoved = false;
         return;
       }
+
       const hit = this._pick(e, raycaster, pointer);
-      const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+      // ギズモ（矢印）の上を動かさずにタップした場合は、その下の部品を選ぶ。
+      // スマホではギズモが大きく部品に重なるため。何もなければ選択はそのまま。
+      if (down.onGizmo && !hit) return;
+      const additive = e.shiftKey || e.ctrlKey || e.metaKey || this.multiSelect;
+      // 処理時間ではなく入力が起きた時刻で比べる（1 回目の選択処理が重くても判定がずれないように）
+      const now = e.timeStamp;
+      const isDouble =
+        lastTap && now - lastTap.time < 400 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30;
+      lastTap = { time: now, x: e.clientX, y: e.clientY };
+
       if (!hit) {
         if (!additive) this.select([]);
         return;
       }
-      // 通常はグループ全体を選ぶ。Alt+クリック（またはダブルクリック）なら中の部品を直接選ぶ
-      const target = e.altKey ? hit : this._topLevel(hit);
-      this.select([target], { toggle: additive });
+      // 通常はグループ全体を選ぶ。Alt+クリックやダブルクリック / ダブルタップなら中の部品を直接選ぶ
+      if (e.altKey || (isDouble && hit !== this._topLevel(hit))) {
+        lastTap = null;
+        this.select([hit]);
+        return;
+      }
+      this.select([this._topLevel(hit)], { toggle: additive });
     });
-    el.addEventListener('dblclick', (e) => {
-      const hit = this._pick(e, raycaster, pointer);
-      if (hit) this.select([hit]);
-    });
+  }
+
+  /** タップで選択を追加・解除するモード（タッチ端末で Shift キーの代わり） */
+  setMultiSelect(enabled) {
+    this.multiSelect = enabled;
+    this.dispatchEvent(new Event('mode'));
   }
 
   _pick(e, raycaster, pointer) {
