@@ -479,6 +479,35 @@ h3 {
   display: none;
 }
 
+/* 複数選択モードの案内 */
+.multi-banner {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 7;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 12px;
+  max-width: calc(100% - 16px);
+  padding: 8px 10px 8px 14px;
+  background: rgb(32 35 43 / 94%);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 35%);
+}
+
+.multi-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+body.multi-select .view-buttons {
+  display: none;
+}
+
 /* ================================================================ プロパティ */
 
 .props-empty {
@@ -913,6 +942,13 @@ input[type='color'] {
     font-size: 10px;
   }
 
+  .multi-banner {
+    left: calc(70px + var(--safe-left));
+    right: calc(8px + var(--safe-right));
+    transform: none;
+    max-width: none;
+  }
+
   /* 選択中だけ下に出る操作ボタン */
   .action-bar {
     position: absolute;
@@ -1111,6 +1147,12 @@ input[type='color'] {
   body[data-sheet] .mode-rail small,
   body[data-sheet] .view-buttons {
     display: none;
+  }
+
+  /* 横並びになったモード切替の下に出す */
+  body[data-sheet] .multi-banner {
+    top: 56px;
+    left: 8px;
   }
 
   .view-buttons {

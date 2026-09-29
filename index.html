@@ -64,7 +64,7 @@
       <div class="tool-group desktop-only" aria-label="編集">
         <button data-action="duplicate" title="複製 (Ctrl+D)">複製</button>
         <button data-action="mirror" title="左右反転してコピー (M)">反転コピー</button>
-        <button data-action="group" title="グループ化 (Ctrl+G)">グループ化</button>
+        <button data-action="group" title="選んだ部品を 1 つのグループにまとめる (Ctrl+G)。2 つ以上選んでいないときは選び方を案内します">グループ化</button>
         <button data-action="ungroup" title="グループ解除 (Ctrl+Shift+G)">解除</button>
         <button data-action="ground" title="床に置く (G)">床に置く</button>
         <button data-action="delete" title="削除 (Delete)" class="danger">削除</button>
@@ -112,6 +112,15 @@
           <button data-view="iso" title="斜め">斜め</button>
           <button data-action="focus" title="選択物にズーム (F)">フォーカス</button>
           <button data-action="grid" class="desktop-only" title="グリッド表示切替">グリッド</button>
+        </div>
+
+        <!-- 複数選択モード中の案内（グループ化の手順を兼ねる） -->
+        <div class="multi-banner" id="multi-banner" role="status" hidden>
+          <span id="multi-text"></span>
+          <div class="multi-buttons">
+            <button data-action="groupNow" class="primary">▣ グループ化する</button>
+            <button data-action="multiDone">完了</button>
+          </div>
         </div>
 
         <div class="empty-hint" id="empty-hint">

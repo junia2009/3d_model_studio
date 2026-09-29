@@ -57,6 +57,7 @@ async function saveFile(blob, filename) {
 // style.css のコンパクトレイアウトと同じ条件
 const compactQuery = window.matchMedia('(max-width: 1099px), (pointer: coarse) and (max-width: 1399px)');
 const phoneQuery = window.matchMedia('(max-width: 699px)');
+const touchQuery = window.matchMedia('(pointer: coarse)');
 
 function setSheet(name) {
   if (name) document.body.dataset.sheet = name;
@@ -110,7 +111,19 @@ const actions = {
   deselect: () => editor.select([]),
   duplicate: () => editor.duplicateSelected(),
   mirror: () => editor.mirrorDuplicate('x'),
-  group: () => editor.groupSelected(),
+  // 2 つ以上選んでいればすぐにまとめる。足りなければ複数選択モードにして選び方を案内する
+  group: () => {
+    if (editor.selected.length >= 2) {
+      editor.groupSelected();
+      editor.setMultiSelect(false);
+      toast('グループにしました');
+      return;
+    }
+    editor.setMultiSelect(true);
+    toast(`グループにする部品を${touchQuery.matches ? 'タップ' : 'クリック'}して 2 つ以上選んでください`);
+  },
+  groupNow: () => actions.group(),
+  multiDone: () => editor.setMultiSelect(false),
   ungroup: () => editor.ungroupSelected(),
   ground: () => editor.dropToGround(),
   delete: () => editor.deleteSelected(),
@@ -182,8 +195,23 @@ function updateButtons() {
 
   setDisabled('undo', !editor.history.canUndo);
   setDisabled('redo', !editor.history.canRedo);
-  for (const a of ['duplicate', 'mirror', 'group', 'ground', 'delete', 'deselect']) setDisabled(a, !hasSel);
+  for (const a of ['duplicate', 'mirror', 'ground', 'delete', 'deselect']) setDisabled(a, !hasSel);
+  // グループ化は押すと選び方を案内するので、部品が 2 つ以上あれば常に押せる
+  let parts = 0;
+  editor.modelRoot.traverse((o) => {
+    if (o.userData.kind === 'primitive') parts += 1;
+  });
+  setDisabled('group', parts < 2);
   setDisabled('ungroup', !hasGroup);
+
+  // 複数選択モードの案内
+  const n = editor.selected.length;
+  document.body.classList.toggle('multi-select', editor.multiSelect);
+  $('#multi-banner').hidden = !editor.multiSelect;
+  const verb = touchQuery.matches ? 'タップ' : 'クリック';
+  $('#multi-text').textContent =
+    n < 2 ? `${verb}して部品を選んでください（${n} 個選択中）` : `${n} 個選択中 — ${verb}で追加・解除`;
+  setDisabled('groupNow', n < 2);
 
   for (const btn of $$('[data-mode]')) btn.classList.toggle('active', btn.dataset.mode === editor.transform.mode);
   for (const b of $$('[data-action="space"]')) b.textContent = editor.transform.space === 'local' ? 'ローカル座標' : 'ワールド座標';
@@ -194,11 +222,6 @@ function updateButtons() {
   document.body.classList.toggle('has-selection', hasSel);
   $('#empty-hint').classList.toggle('hidden', editor.modelRoot.children.length > 0);
 
-  const n = editor.selected.length;
-  let parts = 0;
-  editor.modelRoot.traverse((o) => {
-    if (o.userData.kind === 'primitive') parts += 1;
-  });
   $('#status').textContent = `部品 ${parts} 個` + (n ? ` ／ ${n} 個選択中${n === 1 ? `：${editor.primary.name}` : ''}` : '');
 }
 
@@ -253,6 +276,7 @@ window.addEventListener('keydown', (e) => {
     case 'escape':
       return run(() => {
         if (document.body.dataset.sheet) setSheet(null);
+        else if (editor.multiSelect) editor.setMultiSelect(false);
         else editor.select([]);
       });
     default:
