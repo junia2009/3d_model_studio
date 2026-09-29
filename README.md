@@ -19,6 +19,18 @@ npm run build    # dist/ に出力（相対パスなので GitHub Pages 等に�
 npm run preview
 ```
 
+## GitHub Pages で公開する
+
+`.github/workflows/deploy.yml` により、`main` ブランチに push されるたびに自動でビルドして GitHub Pages に公開されます。
+
+最初の 1 回だけ、リポジトリの設定が必要です。
+
+1. GitHub のリポジトリページで **Settings → Pages** を開く
+2. **Build and deployment → Source** を **GitHub Actions** にする
+3. `main` に push（または **Actions** タブから「Deploy to GitHub Pages」を手動実行）
+
+公開 URL: `https://<ユーザー名>.github.io/3d_model_studio/`
+
 ## できること
 
 | 分類 | 機能 |
