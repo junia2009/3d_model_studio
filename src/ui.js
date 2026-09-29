@@ -105,7 +105,36 @@ export function initOutliner(container, editor) {
       ),
     );
 
+    // 長押しで選択に追加（タッチ端末向け）。長押し直後の click は無視する
+    let pressTimer = null;
+    let longPressed = false;
+    let pressStart = null;
+    const cancelPress = () => {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    };
+    row.addEventListener('pointerdown', (e) => {
+      longPressed = false;
+      if (e.pointerType === 'mouse' || e.target.closest('.handle, .eye, .twisty')) return;
+      pressStart = { x: e.clientX, y: e.clientY };
+      pressTimer = setTimeout(() => {
+        pressTimer = null;
+        longPressed = true;
+        navigator.vibrate?.(15);
+        editor.addToSelection(obj);
+      }, 500);
+    });
+    row.addEventListener('pointermove', (e) => {
+      if (pressTimer && Math.hypot(e.clientX - pressStart.x, e.clientY - pressStart.y) > 10) cancelPress();
+    });
+    row.addEventListener('pointerup', cancelPress);
+    row.addEventListener('pointercancel', cancelPress);
+    row.addEventListener('contextmenu', (e) => e.preventDefault());
     row.addEventListener('click', (e) => {
+      if (longPressed) {
+        longPressed = false;
+        return;
+      }
       editor.select([obj], { toggle: e.shiftKey || e.ctrlKey || e.metaKey || editor.multiSelect });
     });
     name.addEventListener('dblclick', (e) => {

@@ -173,12 +173,40 @@ export class Editor extends EventTarget {
     let multiTouch = false;
     let lastTap = null;
 
+    let longPressTimer = null;
+    const cancelLongPress = () => {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    };
+
     el.addEventListener('pointerdown', (e) => {
       // TransformControls のリスナーが先に走るので、ギズモ上かどうかは axis で分かる
-      active.set(e.pointerId, { x: e.clientX, y: e.clientY, onGizmo: this.transform.axis !== null });
-      if (active.size > 1) multiTouch = true;
+      const down = { x: e.clientX, y: e.clientY, onGizmo: this.transform.axis !== null, longPressed: false };
+      active.set(e.pointerId, down);
+      cancelLongPress();
+      if (active.size > 1) {
+        multiTouch = true;
+        return;
+      }
+      // 長押し（指を動かさずに 0.5 秒）で選択に追加する。タッチ端末で Shift+クリックの代わり
+      if (e.pointerType !== 'mouse' && !down.onGizmo) {
+        longPressTimer = setTimeout(() => {
+          longPressTimer = null;
+          if (multiTouch || active.get(e.pointerId) !== down) return;
+          const hit = this._pick({ clientX: down.x, clientY: down.y }, raycaster, pointer);
+          if (!hit) return;
+          down.longPressed = true;
+          navigator.vibrate?.(15);
+          this.addToSelection(this._topLevel(hit));
+        }, 500);
+      }
+    });
+    el.addEventListener('pointermove', (e) => {
+      const down = active.get(e.pointerId);
+      if (down && longPressTimer && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 10) cancelLongPress();
     });
     const release = (e) => {
+      cancelLongPress();
       const down = active.get(e.pointerId);
       active.delete(e.pointerId);
       const wasMulti = multiTouch;
@@ -188,7 +216,7 @@ export class Editor extends EventTarget {
     el.addEventListener('pointercancel', release);
     el.addEventListener('pointerup', (e) => {
       const down = release(e);
-      if (!down || e.button !== 0) return;
+      if (!down || e.button > 0 || down.longPressed) return;
       const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
       const tolerance = e.pointerType === 'mouse' ? 4 : 12;
       // ドラッグ（視点移動）やギズモ操作のときは選択しない
@@ -220,6 +248,17 @@ export class Editor extends EventTarget {
       }
       this.select([this._topLevel(hit)], { toggle: additive });
     });
+  }
+
+  /**
+   * 長押しで選択に加える。複数選択モードに切り替えるので、続けてタップで追加・解除できる。
+   * すでに選択中なら外す（ただし唯一の選択はそのまま残す）。
+   */
+  addToSelection(obj) {
+    const already = this.selected.includes(obj);
+    this.setMultiSelect(true);
+    if (already && this.selected.length === 1) return;
+    this.select([obj], { toggle: true });
   }
 
   /** タップで選択を追加・解除するモード（タッチ端末で Shift キーの代わり） */

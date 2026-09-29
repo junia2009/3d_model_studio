@@ -14,13 +14,13 @@ initProperties($('#properties'), editor);
 // ---------------------------------------------------------------- 通知
 
 let toastTimer;
-function toast(message, { error = false } = {}) {
+function toast(message, { error = false, duration = 2200 } = {}) {
   const t = $('#toast');
   t.textContent = message;
   t.classList.toggle('error', error);
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+  toastTimer = setTimeout(() => t.classList.remove('show'), duration);
 }
 
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -121,6 +121,7 @@ const actions = {
     }
     editor.setMultiSelect(true);
     toast(`グループにする部品を${touchQuery.matches ? 'タップ' : 'クリック'}して 2 つ以上選んでください`);
+    return;
   },
   groupNow: () => actions.group(),
   multiDone: () => editor.setMultiSelect(false),
@@ -226,6 +227,18 @@ function updateButtons() {
 }
 
 for (const ev of ['selection', 'change', 'history', 'mode']) editor.addEventListener(ev, updateButtons);
+
+// タッチ端末で初めて部品を選んだときに、複数選択のやり方を 1 回だけ教える
+editor.addEventListener('selection', () => {
+  if (!touchQuery.matches || editor.selected.length !== 1 || editor.multiSelect) return;
+  try {
+    if (localStorage.getItem('three-model-studio:hint-longpress')) return;
+    localStorage.setItem('three-model-studio:hint-longpress', '1');
+  } catch {
+    // ストレージが使えなくてもヒントは出す
+  }
+  toast('ヒント: 他の部品を長押しすると、一緒に選べます', { duration: 4000 });
+});
 
 // ---------------------------------------------------------------- ショートカット
 
