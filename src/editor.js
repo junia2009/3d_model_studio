@@ -21,8 +21,6 @@ import {
   validateSceneData,
 } from './serializer.js';
 
-const AUTOSAVE_KEY = 'three-model-studio:autosave';
-const WORLD_KEY = 'three-model-studio:world';
 
 /** 「作業用ライト」：世界の光に関係なく、部品の色がそのまま見える明かり */
 const WORK_LIGHTS = { hemi: ['#ffffff', '#445066', 1.4], sun: ['#ffffff', 2.2, [5, 10, 6]], exposure: 1 };
@@ -55,7 +53,7 @@ export class Editor extends EventTarget {
     this._initRenderer();
     this._initScene();
     this.workLight = false;
-    this.setWorld(DEFAULT_WORLD, { save: false });
+    this.setWorld(DEFAULT_WORLD);
     this._initControls();
     this._initPicking();
     this._initObjectDrag();
@@ -473,8 +471,8 @@ export class Editor extends EventTarget {
 
   // ---------------------------------------------------------------- 世界（背景）
 
-  /** 世界を切り替える。save: false なら選択を記憶しない（起動時など） */
-  setWorld(id, { save = true } = {}) {
+  /** 世界を切り替える */
+  setWorld(id) {
     const def = getWorld(id) ?? getWorld(DEFAULT_WORLD);
     if (this.world) {
       for (const child of [...this.worldRoot.children]) {
@@ -512,14 +510,6 @@ export class Editor extends EventTarget {
       });
     }
     this._applyWorldLights();
-
-    if (save) {
-      try {
-        localStorage.setItem(WORLD_KEY, def.id);
-      } catch {
-        // 保存できなくても切り替え自体は行う
-      }
-    }
     this.dispatchEvent(new Event('world'));
   }
 
@@ -885,6 +875,13 @@ export class Editor extends EventTarget {
     this.camera.position.copy(center).addScaledVector(dir, dist);
   }
 
+  /** 最初と同じ視点に戻す（空の作品を開いたときなど） */
+  resetView() {
+    this.orbit.target.set(0, 0.5, 0);
+    this.camera.position.set(4, 3.5, 5);
+    this.camera.lookAt(this.orbit.target);
+  }
+
   setView(view) {
     const dirs = {
       front: [0, 0, 1],
@@ -913,7 +910,7 @@ export class Editor extends EventTarget {
   /** 変更を確定して履歴に積む */
   commit() {
     const snap = this.snapshot();
-    if (this.history.push(snap)) this._autosave(snap);
+    this.history.push(snap);
     this.dispatchEvent(new Event('change'));
     this.dispatchEvent(new Event('history'));
   }
@@ -932,7 +929,6 @@ export class Editor extends EventTarget {
     const selectedIds = this.selected.map((o) => o.userData.id);
     this._loadObjects(JSON.parse(snap).objects);
     this.select(selectedIds.map((id) => this.findById(id)).filter(Boolean));
-    this._autosave(snap);
     this.dispatchEvent(new Event('change'));
     this.dispatchEvent(new Event('history'));
   }
@@ -953,9 +949,7 @@ export class Editor extends EventTarget {
     // 世界の情報がある保存ファイルなら、その世界に切り替える
     if (data.world && getWorld(data.world) && data.world !== this.worldId) this.setWorld(data.world);
     this._loadObjects(data.objects);
-    const snap = this.snapshot();
-    this.history.reset(snap);
-    this._autosave(snap);
+    this.history.reset(this.snapshot());
     this.dispatchEvent(new Event('change'));
     this.dispatchEvent(new Event('history'));
   }
@@ -966,34 +960,6 @@ export class Editor extends EventTarget {
 
   getSceneData() {
     return { ...serializeScene(this.modelRoot), world: this.worldId };
-  }
-
-  restoreAutosave() {
-    try {
-      const worldId = localStorage.getItem(WORLD_KEY);
-      if (worldId && getWorld(worldId)) this.setWorld(worldId, { save: false });
-    } catch {
-      // 読めなければ最初の世界のまま
-    }
-    try {
-      const raw = localStorage.getItem(AUTOSAVE_KEY);
-      if (raw) {
-        this.loadScene(JSON.parse(raw));
-        return this.modelRoot.children.length > 0;
-      }
-    } catch (err) {
-      console.warn('自動保存の復元に失敗しました', err);
-    }
-    this.loadScene(serializeScene(new THREE.Group()));
-    return false;
-  }
-
-  _autosave(snap) {
-    try {
-      localStorage.setItem(AUTOSAVE_KEY, snap);
-    } catch {
-      // ストレージが使えない環境では自動保存しない
-    }
   }
 
   // ---------------------------------------------------------------- 書き出し
@@ -1039,6 +1005,25 @@ export class Editor extends EventTarget {
       default:
         throw new Error(`未対応の形式です: ${format}`);
     }
+  }
+
+  /** 作品一覧用の小さな見本画像（JPEG の data URL）。選択枠やギズモは写さない */
+  captureThumbnail(width = 240, height = 150) {
+    const prev = [this.helpers.visible, this.selectionBoxes.visible, this.transform.getHelper().visible];
+    this.selectionBoxes.visible = false;
+    this.transform.getHelper().visible = false;
+    this.renderer.render(this.scene, this.camera);
+    const src = this.renderer.domElement;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    // 縦横比を保って中央を切り抜く
+    const scale = Math.max(width / src.width, height / src.height);
+    const sw = width / scale;
+    const sh = height / scale;
+    canvas.getContext('2d').drawImage(src, (src.width - sw) / 2, (src.height - sh) / 2, sw, sh, 0, 0, width, height);
+    [this.helpers.visible, this.selectionBoxes.visible, this.transform.getHelper().visible] = prev;
+    return canvas.toDataURL('image/jpeg', 0.72);
   }
 
   async screenshot() {

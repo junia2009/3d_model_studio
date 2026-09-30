@@ -2,6 +2,8 @@ import { Editor } from './editor.js';
 import { initOutliner, initPalette, initProperties, initWorldPicker } from './ui.js';
 import { sampleScene } from './sample.js';
 import { initPWA } from './pwa.js';
+import { initProjects } from './projects-ui.js';
+import { validateSceneData } from './serializer.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -11,6 +13,12 @@ initPalette($('#palette'), editor);
 initOutliner($('#outliner'), editor);
 initProperties($('#properties'), editor);
 initWorldPicker($$('[data-world-picker]'), editor);
+const projects = initProjects(editor, {
+  lists: $$('[data-projects-list]'),
+  menus: $$('details.projects-menu'),
+  nameLabels: $$('[data-project-name]'),
+  toast: (...args) => toast(...args),
+});
 
 // ---------------------------------------------------------------- 通知
 
@@ -84,24 +92,22 @@ document.addEventListener('gesturestart', (e) => e.preventDefault());
 // ---------------------------------------------------------------- 操作
 
 const actions = {
+  // 新しい作品（今の作品は自動保存されたまま残る）
   new: () => {
-    if (editor.modelRoot.children.length && !confirm('今のモデルを消して新規作成しますか？')) return;
-    editor.newScene();
-    toast('新規作成しました');
+    projects.create();
+    setSheet(null);
   },
   open: () => $('#file-input').click(),
   save: async () => {
     const json = JSON.stringify(editor.getSceneData(), null, 2);
-    if (await saveFile(new Blob([json], { type: 'application/json' }), 'model.studio.json')) {
-      toast('保存しました（model.studio.json）');
+    const name = `${fileBaseName()}.studio.json`;
+    if (await saveFile(new Blob([json], { type: 'application/json' }), name)) {
+      toast(`保存しました（${name}）`);
     }
   },
   sample: () => {
-    if (editor.modelRoot.children.length && !confirm('今のモデルを消してサンプルを開きますか？')) return;
-    editor.loadScene(sampleScene());
-    editor.focusSelected();
+    openAsProject(sampleScene(), 'サンプル');
     setSheet(null);
-    toast('サンプルを読み込みました');
   },
   undo: () => editor.undo(),
   redo: () => editor.redo(),
@@ -156,7 +162,7 @@ for (const btn of $$('[data-export]')) {
         }
         blob = await editor.exportModel(format);
       }
-      if (await saveFile(blob, `model.${format}`)) toast(`${format.toUpperCase()} で書き出しました`);
+      if (await saveFile(blob, `${fileBaseName()}.${format}`)) toast(`${format.toUpperCase()} で書き出しました`);
     } catch (err) {
       console.error(err);
       toast(`書き出しに失敗しました: ${err.message}`, { error: true });
@@ -174,14 +180,33 @@ $('#file-input').addEventListener('change', async (e) => {
   e.target.value = '';
   if (!file) return;
   try {
-    editor.loadScene(JSON.parse(await file.text()));
-    editor.focusSelected();
-    toast(`${file.name} を開きました`);
+    const data = validateSceneData(JSON.parse(await file.text()));
+    openAsProject(data, file.name.replace(/(\.studio)?\.json$/i, ''));
   } catch (err) {
     console.error(err);
     toast(`開けませんでした: ${err.message}`, { error: true });
   }
 });
+
+/**
+ * 読み込んだデータ（ファイル・サンプル）を新しい作品として開く。
+ * すでに 5 件あるときは、今の作品を置き換えてよいか確認する。
+ */
+function openAsProject(data, name) {
+  if (!projects.store.isFull) {
+    projects.create({ data, name });
+    return;
+  }
+  const cur = projects.current;
+  if (!confirm(`作品が 5 件あるため、新しい作品として開けません。\n今の作品「${cur?.name}」を「${name}」の内容で置き換えますか？`)) return;
+  projects.replaceCurrent(data);
+  toast(`「${cur?.name}」を「${name}」の内容で置き換えました`);
+}
+
+/** 保存・書き出しのファイル名（作品名から、ファイル名に使えない文字を除く） */
+function fileBaseName() {
+  return (projects.current?.name ?? 'model').replace(/[\\/:*?"<>|]/g, '_').trim() || 'model';
+}
 
 // ---------------------------------------------------------------- ボタンの状態
 
@@ -299,10 +324,7 @@ window.addEventListener('keydown', (e) => {
 
 // ---------------------------------------------------------------- 起動
 
-if (editor.restoreAutosave()) {
-  editor.focusSelected();
-  toast('前回の作業を復元しました');
-}
+if (projects.boot()) toast(`「${projects.current.name}」の続きから始めます`);
 updateButtons();
 initPWA({ isIOS });
 

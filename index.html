@@ -30,8 +30,16 @@
         <span class="brand-name">3D Model Studio</span>
       </div>
 
+      <!-- 作品（最大 5 件）の切り替え。PC・タブレット・スマホ共通 -->
+      <div class="tool-group projects-group" aria-label="作品">
+        <details class="menu projects-menu">
+          <summary class="projects-summary" title="作品を切り替える・新しく作る（5 件まで保存）">📁 <span data-project-name>作品</span> ▾</summary>
+          <div class="menu-items projects-popover" data-projects-list></div>
+        </details>
+      </div>
+
       <div class="tool-group desktop-only" aria-label="ファイル">
-        <button data-action="new" title="新規作成">新規</button>
+        <button data-action="new" title="新しい作品を作る（今の作品は自動保存されたまま残ります）">新規</button>
         <button data-action="open" title="JSON ファイルを開く (Ctrl+O)">開く</button>
         <button data-action="save" title="JSON ファイルとして保存 (Ctrl+S)">保存</button>
         <details class="menu">
@@ -181,7 +189,7 @@
           </div>
           <h3>ファイル</h3>
           <div class="menu-grid">
-            <button data-action="new">📄 新規</button>
+            <button data-action="new">📄 新しい作品</button>
             <button data-action="open">📂 開く</button>
             <button data-action="save">💾 保存</button>
             <button data-action="sample">🤖 サンプル</button>

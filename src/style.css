@@ -508,6 +508,128 @@ body.multi-select .view-buttons {
   display: none;
 }
 
+/* ================================================================ 作品の一覧 */
+
+.projects-summary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 220px;
+}
+
+.projects-summary [data-project-name] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-popover {
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(75vh, 620px);
+  overflow-y: auto;
+  padding: 10px;
+  gap: 6px;
+}
+
+.projects-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.project-item {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+
+.project-item.current {
+  border-color: var(--accent);
+  background: rgb(79 140 255 / 14%);
+}
+
+.menu-items .project-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  white-space: normal;
+}
+
+.project-thumb {
+  flex: none;
+  width: 96px;
+  height: 60px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: var(--bg);
+}
+
+.project-thumb.empty {
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+}
+
+.project-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.project-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.project-meta small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.current-badge {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.project-actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px 4px 4px 0;
+}
+
+.menu-items .project-actions button {
+  padding: 2px 8px;
+  min-height: 0;
+  background: transparent;
+  border-color: transparent;
+  text-align: center;
+}
+
+.menu-items .project-new {
+  margin-top: 4px;
+  text-align: center;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 /* ================================================================ 世界の選択 */
 
 .world-popover {
@@ -1271,8 +1393,33 @@ input[type='color'] {
   }
 }
 
-@media (max-width: 380px) {
+@media (max-width: 699px) {
+  /* 作品名を出す場所をつくる */
   .brand-name {
     display: none;
+  }
+
+  .projects-summary {
+    max-width: 44vw;
+  }
+
+  .projects-popover {
+    position: fixed;
+    left: calc(8px + var(--safe-left));
+    right: calc(8px + var(--safe-right));
+    top: calc(60px + var(--safe-top));
+    width: auto;
+  }
+}
+
+@media (pointer: coarse) {
+  .menu-items .project-actions button {
+    min-height: 34px;
+    min-width: 40px;
+    font-size: 16px;
+  }
+
+  .menu-items .project-new {
+    min-height: 44px;
   }
 }
