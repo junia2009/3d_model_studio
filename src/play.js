@@ -75,6 +75,13 @@ export class Player {
     this._onKeyUp = (e) => this._key(e, false);
     this._onBlur = () => this.keys.clear();
     this._frame = (dt) => this.update(dt);
+    // 指やマウスでカメラを回している間（と離した直後）は、カメラを自動で後ろへ回さない
+    this.camHold = 0;
+    this._onOrbitStart = () => (this.dragging = true);
+    this._onOrbitEnd = () => {
+      this.dragging = false;
+      this.camHold = 1.2;
+    };
   }
 
   // ================================================================ 開始・終了
@@ -129,6 +136,12 @@ export class Player {
     window.addEventListener('keydown', this._onKeyDown);
     window.addEventListener('keyup', this._onKeyUp);
     window.addEventListener('blur', this._onBlur);
+    ed.orbit.addEventListener('start', this._onOrbitStart);
+    ed.orbit.addEventListener('end', this._onOrbitEnd);
+    this.dragging = false;
+    this.camHold = 0;
+    // 「遊ぶ」ボタンにフォーカスが残ると、スペースキーでボタンが押されてしまう
+    document.activeElement?.blur?.();
     ed.addFrameCallback(this._frame);
     this.active = true;
     ed.dispatchEvent(new Event('play'));
@@ -143,6 +156,8 @@ export class Player {
     window.removeEventListener('keydown', this._onKeyDown);
     window.removeEventListener('keyup', this._onKeyUp);
     window.removeEventListener('blur', this._onBlur);
+    ed.orbit.removeEventListener('start', this._onOrbitStart);
+    ed.orbit.removeEventListener('end', this._onOrbitEnd);
     this.keys.clear();
     this.stick = { x: 0, y: 0 };
 
@@ -469,9 +484,34 @@ export class Player {
     const delta = desired.sub(ed.orbit.target).multiplyScalar(1 - Math.exp(-10 * dt));
     ed.orbit.target.add(delta);
     ed.camera.position.add(delta);
+    this._chaseCamera(dt);
     ed.sun.target.position.copy(s.pos);
     ed.sun.position.copy(s.pos).addScaledVector(this.sunDir, 15);
     ed.shadowPlane.position.set(s.pos.x, (ground ?? s.pos.y) + 0.003, s.pos.z);
+  }
+
+  /**
+   * 歩いている間はカメラをゆっくりキャラクターの後ろへ回り込ませる。
+   * 入力はカメラから見た向きなので、これで「前＋右」を押し続けると右へ曲がり続け、
+   * 歩きながら自由に向きを変えられる。後ろ向きに歩くときはカメラを回さない（ぐるぐる回るのを防ぐ）。
+   */
+  _chaseCamera(dt) {
+    const ed = this.editor;
+    const s = this.state;
+    this.camHold = Math.max(0, this.camHold - dt);
+    if (this.dragging || this.camHold > 0) return;
+    const moving = THREE.MathUtils.clamp(s.speed / this.walkSpeed, 0, 1);
+    if (moving < 0.01) return;
+    const offset = ed.camera.position.clone().sub(ed.orbit.target);
+    if (offset.x * offset.x + offset.z * offset.z < 1e-6) return;
+    const camYaw = Math.atan2(-offset.x, -offset.z); // カメラが向いている方向
+    const diff = angleDelta(camYaw, s.heading);
+    // 前〜横向きのときだけ追いかける（真後ろへ歩くときは 0）
+    const follow = THREE.MathUtils.smoothstep(Math.cos(diff), -0.5, 0.3);
+    const rot = diff * (1 - Math.exp(-2.2 * dt)) * moving * follow;
+    if (Math.abs(rot) < 1e-6) return;
+    offset.applyAxisAngle(UP, rot);
+    ed.camera.position.copy(ed.orbit.target).add(offset);
   }
 
   // ================================================================ 動き
