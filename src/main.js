@@ -83,7 +83,8 @@ compactQuery.addEventListener('change', () => setSheet(null));
 
 // スマホでは部品を追加したらシートを閉じて、追加した部品が見えるようにする
 $('#palette').addEventListener('click', (e) => {
-  if (phoneQuery.matches && e.target.closest('button')) setSheet(null);
+  // 分類のタブを押したときは閉じない
+  if (phoneQuery.matches && e.target.closest('.palette button')) setSheet(null);
 });
 
 // iOS Safari のピンチでページ全体が拡大されるのを防ぐ（3D 画面のピンチはズームに使う）

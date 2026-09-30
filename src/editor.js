@@ -810,9 +810,19 @@ export class Editor extends EventTarget {
   }
 
   updateParams(mesh, params) {
-    Object.assign(mesh.userData.params, params);
+    const next = { ...mesh.userData.params, ...params };
+    let geometry;
+    try {
+      geometry = buildGeometry(mesh.userData.type, next);
+    } catch (err) {
+      // 作れない組み合わせのときは、今の形のまま変えない
+      console.warn('この値では形を作れませんでした', err);
+      return false;
+    }
+    mesh.userData.params = next;
     mesh.geometry.dispose();
-    mesh.geometry = buildGeometry(mesh.userData.type, mesh.userData.params);
+    mesh.geometry = geometry;
+    return true;
   }
 
   /** 選択中のすべての部品（グループの中身も含む）にマテリアル設定を適用 */

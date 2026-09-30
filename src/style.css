@@ -267,6 +267,33 @@ h3 {
 
 /* ================================================================ パレット */
 
+.palette-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.palette-tabs button {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.palette-tabs button small {
+  font-size: 10px;
+  opacity: 0.65;
+}
+
+.palette-tabs button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 .palette {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1061,8 +1088,9 @@ input[type='color'] {
     gap: 0;
   }
 
+  /* 開いているタブの中身だけを出す（PC 用の .panel.left .grow より優先させる） */
   .sheet-section {
-    display: none;
+    display: none !important;
   }
 
   body[data-sheet='add'] [data-section='add'],
@@ -1070,7 +1098,7 @@ input[type='color'] {
   body[data-sheet='props'] [data-section='props'],
   body[data-sheet='menu'] [data-section='menu'],
   body[data-sheet='world'] [data-section='world'] {
-    display: flex;
+    display: flex !important;
     flex-direction: column;
   }
 

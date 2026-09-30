@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PRIMITIVES } from './primitives.js';
+import { CATEGORIES, PRIMITIVES } from './primitives.js';
 import { WORLD_GROUPS, getWorld } from './worlds/index.js';
 import { readMaterialProps } from './serializer.js';
 
@@ -31,16 +31,41 @@ const fmt = (n, digits = 3) => {
 // ================================================================ パレット
 
 export function initPalette(container, editor) {
-  for (const [type, def] of Object.entries(PRIMITIVES)) {
-    container.append(
-      el(
-        'button',
-        { title: `${def.label}を追加`, onclick: () => editor.addPrimitive(type) },
-        el('span', { class: 'icon' }, def.icon),
-        el('span', {}, def.label),
-      ),
+  const tabs = el('div', { class: 'palette-tabs', role: 'tablist' });
+  const grid = el('div', { class: 'palette' });
+  container.replaceChildren(tabs, grid);
+
+  const show = (categoryId) => {
+    for (const t of tabs.children) t.classList.toggle('active', t.dataset.category === categoryId);
+    grid.replaceChildren(
+      ...CATEGORIES.find((c) => c.id === categoryId).types.map((type) => {
+        const def = PRIMITIVES[type];
+        return el(
+          'button',
+          { title: `${def.label}を追加`, onclick: () => editor.addPrimitive(type) },
+          el('span', { class: 'icon' }, def.icon),
+          el('span', {}, def.label),
+        );
+      }),
     );
+    try {
+      localStorage.setItem('three-model-studio:palette-tab', categoryId);
+    } catch {
+      // 覚えられなくても表示には困らない
+    }
+  };
+
+  for (const c of CATEGORIES) {
+    tabs.append(el('button', { role: 'tab', dataset: { category: c.id }, onclick: () => show(c.id) }, `${c.label}`, el('small', {}, c.types.length)));
   }
+  let initial = CATEGORIES[0].id;
+  try {
+    const saved = localStorage.getItem('three-model-studio:palette-tab');
+    if (CATEGORIES.some((c) => c.id === saved)) initial = saved;
+  } catch {
+    // 最初のタブのまま
+  }
+  show(initial);
 }
 
 // ================================================================ アウトライナー

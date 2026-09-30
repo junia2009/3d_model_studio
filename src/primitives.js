@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { EXTRA_PRIMITIVES } from './primitives-extra.js';
 
 /**
  * 部品（プリミティブ）の定義。
@@ -72,7 +73,11 @@ export const PRIMITIVES = {
       // ConeGeometry の 4 分割を 45 度回して、辺が軸に揃った四角錐にする
       const g = new THREE.ConeGeometry(p.size / Math.SQRT2, p.height, 4, 1);
       g.rotateY(Math.PI / 4);
-      return g;
+      // 面ごとに平らに見せる（角錐なのに丸く陰影が付かないように）
+      const flat = g.toNonIndexed();
+      flat.computeVertexNormals();
+      g.dispose();
+      return flat;
     },
   },
   torus: {
@@ -141,6 +146,17 @@ export const PRIMITIVES = {
     build: (p) => new THREE.TorusKnotGeometry(p.radius, p.tube, 128, 16, p.p, p.q),
   },
 };
+
+Object.assign(PRIMITIVES, EXTRA_PRIMITIVES);
+
+/** パレットのタブ（分類）と、その中の並び順 */
+export const CATEGORIES = [
+  { id: 'basic', label: '基本', types: ['box', 'roundedBox', 'sphere', 'hemisphere', 'cylinder', 'cone', 'pyramid', 'capsule', 'plane'] },
+  { id: 'block', label: 'ブロック', types: ['triPrism', 'hexPrism', 'halfCylinder', 'wedge', 'pipe', 'stairs', 'arch', 'lBlock'] },
+  { id: 'curve', label: '曲線', types: ['torus', 'spring', 'torusKnot', 'vase', 'egg', 'drop', 'teapot'] },
+  { id: 'poly', label: '多面体', types: ['tetrahedron', 'octahedron', 'dodecahedron', 'icosahedron'] },
+  { id: 'deco', label: '飾り', types: ['star', 'heart', 'arrow', 'crescent', 'cross', 'leaf', 'cloud', 'gear'] },
+];
 
 export function defaultParams(type) {
   const params = {};
