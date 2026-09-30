@@ -770,6 +770,14 @@ body.multi-select .view-buttons {
   touch-action: none;
 }
 
+select.role-select {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+
 input[type='text'],
 input[type='number'] {
   width: 100%;
@@ -987,7 +995,8 @@ input[type='color'] {
 
   /* iOS は 16px 未満の入力欄にフォーカスすると画面が拡大されるので 16px にする */
   input[type='text'],
-  input[type='number'] {
+  input[type='number'],
+  select.role-select {
     font-size: 16px;
     padding: 6px 8px;
   }
@@ -1450,4 +1459,182 @@ input[type='color'] {
   .menu-items .project-new {
     min-height: 44px;
   }
+}
+
+/* ================================================================ 遊ぶモード */
+
+button.play-button {
+  background: #2f9e44;
+  border-color: #2f9e44;
+  color: #fff;
+  font-weight: 600;
+}
+
+@media (hover: hover) {
+  button.play-button:hover {
+    background: #37b24d;
+    border-color: #37b24d;
+  }
+}
+
+/* 遊んでいる間は作る道具をすべて隠し、3D 画面を全面に */
+body.playing .toolbar,
+body.playing .panel,
+body.playing .bottom-nav,
+body.playing .statusbar,
+body.playing .mode-rail,
+body.playing .view-buttons,
+body.playing .action-bar,
+body.playing .multi-banner,
+body.playing .empty-hint {
+  display: none !important;
+}
+
+/* ツールバーなどを隠した分、3D 画面が画面いっぱいに広がるように行を 1 つにする */
+body.playing {
+  grid-template-rows: 1fr;
+}
+
+body.playing .layout {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  grid-row: 1;
+}
+
+.play-hud {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  padding: calc(10px + var(--safe-top)) calc(10px + var(--safe-right)) calc(14px + var(--safe-bottom)) calc(10px + var(--safe-left));
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.play-hud button {
+  pointer-events: auto;
+  background: rgb(20 22 28 / 70%);
+  border-color: rgb(255 255 255 / 18%);
+  backdrop-filter: blur(4px);
+}
+
+.play-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.play-help {
+  flex: 1;
+  text-align: center;
+  color: #fff;
+  font-size: 12px;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 70%);
+  padding-top: 6px;
+}
+
+.play-help .touch-keys {
+  display: none;
+}
+
+.joystick,
+.play-buttons {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .play-help .desktop-keys {
+    display: none;
+  }
+
+  .play-help .touch-keys {
+    display: inline;
+  }
+
+  .joystick {
+    display: block;
+    position: absolute;
+    left: calc(24px + var(--safe-left));
+    bottom: calc(28px + var(--safe-bottom));
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    background: rgb(255 255 255 / 12%);
+    border: 2px solid rgb(255 255 255 / 30%);
+    pointer-events: auto;
+    touch-action: none;
+  }
+
+  .joystick .knob {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 58px;
+    height: 58px;
+    margin: -29px 0 0 -29px;
+    border-radius: 50%;
+    background: rgb(255 255 255 / 75%);
+    box-shadow: 0 2px 8px rgb(0 0 0 / 35%);
+  }
+
+  .play-buttons {
+    display: flex;
+    align-items: flex-end;
+    gap: 14px;
+    position: absolute;
+    right: calc(24px + var(--safe-right));
+    bottom: calc(32px + var(--safe-bottom));
+  }
+
+  .play-buttons button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 24px;
+    line-height: 1;
+    touch-action: none;
+  }
+
+  .play-buttons small {
+    font-size: 10px;
+    margin-top: 2px;
+  }
+
+  .play-run {
+    width: 66px;
+    height: 66px;
+  }
+
+  .play-run[aria-pressed='true'] {
+    background: #f08c00;
+    border-color: #f08c00;
+  }
+
+  .play-jump {
+    width: 88px;
+    height: 88px;
+    margin-bottom: 20px;
+    background: rgb(47 158 68 / 85%) !important;
+    border-color: #2f9e44 !important;
+  }
+}
+
+@media (max-width: 699px) {
+  .play-help {
+    font-size: 11px;
+  }
+
+  .play-top button {
+    padding: 6px 10px;
+  }
+}
+
+/* 遊んでいる間の通知は、スティックやボタンと重ならないよう上に出す */
+body.playing .toast,
+body.playing.has-selection .toast {
+  top: calc(64px + var(--safe-top));
+  bottom: auto;
 }

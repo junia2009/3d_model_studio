@@ -4,6 +4,7 @@ import { sampleScene } from './sample.js';
 import { initPWA } from './pwa.js';
 import { initProjects } from './projects-ui.js';
 import { validateSceneData } from './serializer.js';
+import { Player } from './play.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -93,6 +94,7 @@ document.addEventListener('gesturestart', (e) => e.preventDefault());
 // ---------------------------------------------------------------- 操作
 
 const actions = {
+  play: () => startPlay(),
   // 新しい作品（今の作品は自動保存されたまま残る）
   new: () => {
     projects.create();
@@ -267,9 +269,85 @@ editor.addEventListener('selection', () => {
   toast('ヒント: 他の部品を長押しすると、一緒に選べます', { duration: 4000 });
 });
 
+// ---------------------------------------------------------------- 遊ぶモード
+
+const player = new Player(editor, {
+  toast: (msg) => toast(msg),
+  onStop: () => {
+    document.body.classList.remove('playing');
+    $('#play-hud').hidden = true;
+    resetStick();
+    updateButtons();
+  },
+});
+
+function startPlay() {
+  setSheet(null);
+  $$('details.menu[open]').forEach((d) => (d.open = false));
+  if (!player.start()) {
+    toast('部品を置いてから遊べます', { error: true });
+    return;
+  }
+  document.body.classList.add('playing');
+  $('#play-hud').hidden = false;
+  $('[data-play="run"]').setAttribute('aria-pressed', 'false');
+  player.setRun(false);
+  const who = editor.modelRoot.children.filter((o) => o.visible).length;
+  toast(who > 1 && player.sources.length === 1 ? `「${player.sources[0].name}」を動かします（ほかの部品は置物になります）` : 'モデルを動かします');
+}
+
+$('[data-play="exit"]').addEventListener('click', () => player.stop());
+$('[data-play="turn"]').addEventListener('click', () => {
+  player.turnFacing();
+  toast('モデルの正面の向きを 90° 回しました');
+});
+$('[data-play="run"]').addEventListener('click', (e) => {
+  const on = e.currentTarget.getAttribute('aria-pressed') !== 'true';
+  e.currentTarget.setAttribute('aria-pressed', String(on));
+  player.setRun(on);
+});
+$('[data-play="jump"]').addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  player.jump();
+});
+
+// 画面のスティック（指の位置を -1〜1 にして Player に渡す）
+const stick = $('#joystick');
+const knob = stick.querySelector('.knob');
+let stickPointer = null;
+function resetStick() {
+  stickPointer = null;
+  knob.style.transform = '';
+  player.setStick(0, 0);
+}
+const moveStick = (e) => {
+  const r = stick.getBoundingClientRect();
+  const max = r.width / 2;
+  let dx = e.clientX - (r.left + max);
+  let dy = e.clientY - (r.top + max);
+  const len = Math.hypot(dx, dy);
+  if (len > max) {
+    dx *= max / len;
+    dy *= max / len;
+  }
+  knob.style.transform = `translate(${dx}px, ${dy}px)`;
+  player.setStick(dx / max, -dy / max);
+};
+stick.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  stickPointer = e.pointerId;
+  stick.setPointerCapture(e.pointerId);
+  moveStick(e);
+});
+stick.addEventListener('pointermove', (e) => e.pointerId === stickPointer && moveStick(e));
+stick.addEventListener('pointerup', (e) => e.pointerId === stickPointer && resetStick());
+stick.addEventListener('pointercancel', (e) => e.pointerId === stickPointer && resetStick());
+
 // ---------------------------------------------------------------- ショートカット
 
 window.addEventListener('keydown', (e) => {
+  // 遊んでいる間の操作は Player が受け持つ
+  if (editor.playing) return;
   const tag = e.target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   const mod = e.ctrlKey || e.metaKey;
@@ -331,3 +409,4 @@ initPWA({ isIOS });
 
 // デバッグ・自動テスト用
 window.studio = editor;
+window.player = player;

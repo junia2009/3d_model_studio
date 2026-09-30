@@ -62,6 +62,10 @@
         </details>
       </div>
 
+      <div class="tool-group" aria-label="遊ぶ">
+        <button data-action="play" class="play-button" title="作ったモデルを操作して、世界を歩き回る">▶ 遊ぶ</button>
+      </div>
+
       <div class="tool-group" aria-label="履歴">
         <button data-action="undo" class="icon-btn" title="元に戻す (Ctrl+Z)" aria-label="元に戻す">↶</button>
         <button data-action="redo" class="icon-btn" title="やり直し (Ctrl+Shift+Z / Ctrl+Y)" aria-label="やり直し">↷</button>
@@ -145,6 +149,23 @@
           </p>
           <p class="gesture-hint compact-only">1 本指: 視点の回転 ／ 2 本指: 視点の移動・ズーム<br />タップ: 選択 ／ 長押し: 選択に追加<br />選んだ部品をドラッグ: 床の上で移動</p>
           <button data-action="sample">サンプルを開いてみる</button>
+        </div>
+
+        <!-- 遊ぶモードの操作 -->
+        <div class="play-hud" id="play-hud" hidden>
+          <div class="play-top">
+            <button data-play="exit" class="play-exit" title="作る画面に戻る (Esc)">✕ 作る画面へ</button>
+            <span class="play-help">
+              <span class="desktop-keys">WASD / 矢印: 移動 ／ Shift: 走る ／ Space: ジャンプ ／ ドラッグ: 見回す ／ ホイール: ズーム</span>
+              <span class="touch-keys">左のスティック: 移動 ／ 画面をドラッグ: 見回す</span>
+            </span>
+            <button data-play="turn" title="モデルの正面の向きを 90° 回す（後ろ向きに歩くとき）">↻ 正面の向き</button>
+          </div>
+          <div class="joystick" id="joystick" aria-label="移動スティック"><div class="knob"></div></div>
+          <div class="play-buttons">
+            <button data-play="run" class="play-run" aria-pressed="false">🏃<small>走る</small></button>
+            <button data-play="jump" class="play-jump">⤒<small>ジャンプ</small></button>
+          </div>
         </div>
 
         <!-- 選択中のみ出る編集ボタン（タブレット・スマホ） -->

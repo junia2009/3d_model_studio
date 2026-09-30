@@ -62,6 +62,8 @@ export const meadow = {
 
     return {
       group,
+      // 遊ぶモードで歩く地面の高さ
+      groundAt: hill,
       followers: [sky],
       background: null,
       fog: new THREE.Fog('#c3dcf1', 70, 260),
@@ -87,12 +89,13 @@ export const seaside = {
     const { sky, sunDir } = makeSky({ elevation: 3, azimuth: 180, turbidity: 10, rayleigh: 3, mie: 0.006, mieG: 0.85 });
 
     // 砂浜（奥＝ -z に向かって海へ下っていく）
+    const beachHeight = (x, z) => {
+      const slope = smoothstep(-6, -22, z) * -2.2;
+      const dunes = awayFromCenter(x, z, 14, 60) * (z > 0 ? fbm(x * 0.05, z * 0.05) * 2 : 0);
+      return slope + dunes;
+    };
     const beach = makeTerrain({
-      height: (x, z) => {
-        const slope = smoothstep(-6, -22, z) * -2.2;
-        const dunes = awayFromCenter(x, z, 14, 60) * (z > 0 ? fbm(x * 0.05, z * 0.05) * 2 : 0);
-        return slope + dunes;
-      },
+      height: beachHeight,
       color: (x, z) => {
         const n = fbm(x * 0.2, z * 0.2);
         const wet = smoothstep(-10, -18, z);
@@ -184,6 +187,8 @@ export const seaside = {
 
     return {
       group,
+      // 遊ぶモードで歩く地面の高さ
+      groundAt: beachHeight,
       followers: [sky],
       background: null,
       fog: new THREE.Fog(fogColor, 80, 320),
@@ -227,6 +232,8 @@ export const snowfield = {
     group.add(makeParticles({ count: 2500, area: [70, 30, 70], color: '#ffffff', size: 0.12, speed: 1.2, direction: -1, sway: 0.6 }));
     return {
       group,
+      // 遊ぶモードで歩く地面の高さ
+      groundAt: hill,
       background: new THREE.Color(bg),
       fog: new THREE.FogExp2(bg, 0.016),
       lights: { hemi: ['#eef4ff', '#b7c3d3', 1.5], sun: ['#ffffff', 1.3, [3, 10, 4]] },
@@ -306,6 +313,8 @@ export const desert = {
 
     return {
       group,
+      // 遊ぶモードで歩く地面の高さ
+      groundAt: dune,
       followers: [sky],
       background: null,
       fog: new THREE.Fog('#ead3ae', 90, 330),
@@ -373,6 +382,8 @@ export const forest = {
 
     return {
       group,
+      // 遊ぶモードで歩く地面の高さ
+      groundAt: height,
       background: new THREE.Color(fogColor),
       fog: new THREE.Fog(fogColor, 14, 75),
       lights: { hemi: ['#c8ebc8', '#2e3a24', 1.0], sun: ['#ffe8ad', 2.2, [6, 14, 3]] },
@@ -501,6 +512,10 @@ export const underwater = {
 
     return {
       group,
+      // 遊ぶモードで歩く地面の高さ
+      groundAt: floor,
+      // 水の中はふわっと跳ぶ
+      gravity: 0.5,
       background: new THREE.Color(fogColor),
       fog: new THREE.FogExp2(fogColor, 0.04),
       lights: { hemi: ['#86dcff', '#0a2e45', 1.2], sun: ['#c6f3ff', 1.6, [1, 20, 2]] },

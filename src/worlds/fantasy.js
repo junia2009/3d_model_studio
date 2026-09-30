@@ -65,6 +65,8 @@ export const night = {
 
     return {
       group,
+      // 遊ぶモードで歩く地面の高さ
+      groundAt: hill,
       background: new THREE.Color('#05070d'),
       fog: new THREE.Fog(fogColor, 60, 250),
       lights: { hemi: ['#8ea3e6', '#1a2236', 1.1], sun: ['#c9d5ff', 1.8, [moonDir.x * 15, 0.5 * 15, moonDir.z * 15]] },
@@ -144,6 +146,8 @@ export const space = {
 
     return {
       group,
+      // 見えない床の上を歩き、重力は弱い
+      gravity: 0.35,
       background: new THREE.Color('#02020a'),
       fog: null,
       lights: { hemi: ['#6a74a8', '#05050c', 0.45], sun: ['#fff3e0', 3.2, [10, 6, 9]] },
@@ -218,6 +222,10 @@ export const moon = {
 
     return {
       group,
+      // 遊ぶモードで歩く地面の高さ
+      groundAt: height,
+      // 月の重力は地球の約 1/6
+      gravity: 0.25,
       background: new THREE.Color('#000000'),
       fog: null,
       lights: { hemi: ['#5c6070', '#101014', 0.3], sun: ['#ffffff', 3.4, [9, 6, 5]] },
@@ -470,6 +478,8 @@ export const skyIsland = {
 
     return {
       group,
+      // 島の外は足場がなく、雲の海へ落ちる
+      groundAt: (x, z) => (Math.hypot(x, z) < 8.8 ? 0 : null),
       followers: [sky],
       background: null,
       fog: new THREE.Fog(fogColor, 90, 380),

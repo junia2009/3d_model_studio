@@ -91,6 +91,8 @@ export function serializeObject(obj) {
     node.params = { ...obj.userData.params };
     node.material = readMaterialProps(obj.material);
   }
+  // 遊ぶモードでの役割（足・腕など）。自動のときは保存しない
+  if (obj.userData.role) node.role = obj.userData.role;
   const children = obj.children.filter(isStudioObject);
   if (children.length) node.children = children.map(serializeObject);
   return node;
@@ -105,6 +107,7 @@ export function deserializeObject(node) {
     obj = createPrimitive(node.type, { params: node.params, material: node.material, name: node.name });
   }
   if (node.id) obj.userData.id = node.id;
+  if (node.role) obj.userData.role = node.role;
   obj.visible = node.visible ?? true;
   if (node.position) obj.position.fromArray(node.position);
   if (node.rotation) obj.rotation.set(node.rotation[0], node.rotation[1], node.rotation[2]);

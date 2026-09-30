@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CATEGORIES, PRIMITIVES } from './primitives.js';
 import { WORLD_GROUPS, getWorld } from './worlds/index.js';
+import { ROLE_LABELS, ROLE_OPTIONS, guessRole, resolveRole } from './play.js';
 import { readMaterialProps } from './serializer.js';
 
 const SWATCHES = [
@@ -341,6 +342,7 @@ export function initProperties(container, editor) {
     container.append(
       field('名前', textInput(() => obj.name, (v) => editor.rename(obj, v))),
       field('種類', el('span', {}, el('span', { class: 'badge' }, typeLabel))),
+      field('動きの役割', roleSelect(obj)),
     );
 
     // ---- トランスフォーム
@@ -544,6 +546,28 @@ export function initProperties(container, editor) {
     syncers.push(refresh);
     refresh();
     return el('div', { class: 'range-row' }, range, number);
+  }
+
+  /** 遊ぶモードでの役割。「自動」は名前（なければ親）から推測した役割を表示する */
+  function roleSelect(obj) {
+    const select = el('select', { class: 'role-select', title: '遊ぶモードでこの部品をどう動かすか' });
+    const autoLabel = () => {
+      const guessed = guessRole(obj.name) ?? (obj.parent === editor.modelRoot ? 'body' : resolveRole(obj.parent, editor.modelRoot));
+      return `自動（${guessed === 'body' ? '体' : (ROLE_LABELS[guessed] ?? '体')}）`;
+    };
+    for (const [value, label] of ROLE_OPTIONS) select.append(el('option', { value }, value ? label : autoLabel()));
+    const refresh = () => {
+      select.options[0].textContent = autoLabel();
+      if (document.activeElement !== select) select.value = obj.userData.role ?? '';
+    };
+    select.addEventListener('change', () => {
+      if (select.value) obj.userData.role = select.value;
+      else delete obj.userData.role;
+      editor.commit();
+    });
+    syncers.push(refresh);
+    refresh();
+    return select;
   }
 
   function textInput(get, set) {

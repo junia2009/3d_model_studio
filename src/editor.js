@@ -48,6 +48,10 @@ export class Editor extends EventTarget {
     this.history = new History();
     this.snapEnabled = false;
     this.multiSelect = false;
+    this.playing = false;
+    /** 遊ぶモードの設定（作品ごとに保存）。facing: モデルの正面の向き（0 = 手前 +Z） */
+    this.playSettings = { facing: 0 };
+    this._frameCallbacks = [];
     this._multiStart = null;
 
     this._initRenderer();
@@ -250,7 +254,7 @@ export class Editor extends EventTarget {
     this.container.addEventListener(
       'pointerdown',
       (e) => {
-        if (e.target !== el || drag || this.transform.dragging) return;
+        if (this.playing || e.target !== el || drag || this.transform.dragging) return;
         if (this.transform.mode !== 'translate' || !this.selected.length || e.button > 0) return;
         setRay(e);
         // ギズモの上ならギズモに任せる
@@ -341,6 +345,7 @@ export class Editor extends EventTarget {
     };
 
     el.addEventListener('pointerdown', (e) => {
+      if (this.playing) return;
       // TransformControls のリスナーが先に走るので、ギズモ上かどうかは axis で分かる
       const down = { x: e.clientX, y: e.clientY, onGizmo: this.transform.axis !== null, longPressed: false };
       active.set(e.pointerId, down);
@@ -466,7 +471,17 @@ export class Editor extends EventTarget {
     const t = this.timer.getElapsed();
     for (const f of this._worldFollowers) f.position.copy(this.camera.position);
     for (const o of this._worldAnimated) o.userData.update(dt, t, this.camera);
+    for (const cb of this._frameCallbacks) cb(dt, t);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /** 毎フレーム呼ばれる処理を登録する（遊ぶモードなど） */
+  addFrameCallback(cb) {
+    this._frameCallbacks.push(cb);
+  }
+
+  removeFrameCallback(cb) {
+    this._frameCallbacks = this._frameCallbacks.filter((f) => f !== cb);
   }
 
   // ---------------------------------------------------------------- 世界（背景）
@@ -959,6 +974,7 @@ export class Editor extends EventTarget {
     // 世界の情報がある保存ファイルなら、その世界に切り替える
     if (data.world && getWorld(data.world) && data.world !== this.worldId) this.setWorld(data.world);
     this._loadObjects(data.objects);
+    this.playSettings = { facing: data.play?.facing ?? 0 };
     this.history.reset(this.snapshot());
     this.dispatchEvent(new Event('change'));
     this.dispatchEvent(new Event('history'));
@@ -969,7 +985,7 @@ export class Editor extends EventTarget {
   }
 
   getSceneData() {
-    return { ...serializeScene(this.modelRoot), world: this.worldId };
+    return { ...serializeScene(this.modelRoot), world: this.worldId, play: { ...this.playSettings } };
   }
 
   // ---------------------------------------------------------------- 書き出し
