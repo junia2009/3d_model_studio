@@ -3,6 +3,7 @@ import { CATEGORIES, PRIMITIVES } from './primitives.js';
 import { WORLD_GROUPS, getWorld } from './worlds/index.js';
 import { ROLE_LABELS, ROLE_OPTIONS, guessRole, resolveRole } from './play.js';
 import { readMaterialProps } from './serializer.js';
+import { assetInfo, isAssetMissing } from './assets.js';
 
 const SWATCHES = [
   '#f5f5f5', '#9aa0aa', '#3a3d45', '#ff5d5d', '#ff9f43',
@@ -31,14 +32,20 @@ const fmt = (n, digits = 3) => {
 
 // ================================================================ パレット
 
-export function initPalette(container, editor) {
+/**
+ * @param extraTabs 部品以外のタブ（取り込みなど）：{ id, label, render(grid) }
+ */
+export function initPalette(container, editor, extraTabs = []) {
   const tabs = el('div', { class: 'palette-tabs', role: 'tablist' });
   const grid = el('div', { class: 'palette' });
   container.replaceChildren(tabs, grid);
 
   const show = (categoryId) => {
     for (const t of tabs.children) t.classList.toggle('active', t.dataset.category === categoryId);
-    grid.replaceChildren(
+    const extra = extraTabs.find((t) => t.id === categoryId);
+    grid.classList.toggle('palette-extra', !!extra);
+    if (extra) extra.render(grid);
+    else grid.replaceChildren(
       ...CATEGORIES.find((c) => c.id === categoryId).types.map((type) => {
         const def = PRIMITIVES[type];
         return el(
@@ -59,14 +66,18 @@ export function initPalette(container, editor) {
   for (const c of CATEGORIES) {
     tabs.append(el('button', { role: 'tab', dataset: { category: c.id }, onclick: () => show(c.id) }, `${c.label}`, el('small', {}, c.types.length)));
   }
+  for (const t of extraTabs) {
+    tabs.append(el('button', { role: 'tab', class: 'tab-extra', dataset: { category: t.id }, onclick: () => show(t.id) }, t.label));
+  }
   let initial = CATEGORIES[0].id;
   try {
     const saved = localStorage.getItem('three-model-studio:palette-tab');
-    if (CATEGORIES.some((c) => c.id === saved)) initial = saved;
+    if (CATEGORIES.some((c) => c.id === saved) || extraTabs.some((t) => t.id === saved)) initial = saved;
   } catch {
     // 最初のタブのまま
   }
   show(initial);
+  return { show };
 }
 
 // ================================================================ アウトライナー
@@ -115,7 +126,7 @@ export function initOutliner(container, editor) {
         },
         hasChildren ? (isCollapsed ? '▸' : '▾') : '',
       ),
-      el('span', { class: 'kind' }, isGroup ? '📁' : PRIMITIVES[obj.userData.type]?.icon ?? '?'),
+      el('span', { class: 'kind' }, isGroup ? '📁' : obj.userData.kind === 'model' ? '📦' : PRIMITIVES[obj.userData.type]?.icon ?? '?'),
       name,
       el(
         'button',
@@ -326,7 +337,8 @@ export function initProperties(container, editor) {
     }
 
     const isGroup = obj.userData.kind === 'group';
-    const typeLabel = isGroup ? 'グループ' : PRIMITIVES[obj.userData.type].label;
+    const isModel = obj.userData.kind === 'model';
+    const typeLabel = isGroup ? 'グループ' : isModel ? '取り込んだモデル' : PRIMITIVES[obj.userData.type].label;
 
     if (editor.selected.length > 1) {
       container.append(
@@ -372,8 +384,32 @@ export function initProperties(container, editor) {
       ),
     );
 
+    // ---- 取り込んだモデルの情報
+    if (isModel) {
+      const info = assetInfo(obj.userData.asset);
+      container.append(el('h3', {}, 'モデルの情報'));
+      if (!info) {
+        container.append(
+          el('p', { class: 'note' }, isAssetMissing(obj.userData.asset)
+            ? 'このモデルのデータが見つかりません。元のファイルを「取り込み」からもう一度読み込むか、モデルを埋め込んだ保存ファイルを開いてください。'
+            : '読み込み中…'),
+        );
+      } else {
+        const [w, h, d] = info.size.map((v) => fmt(v * 1, 2));
+        container.append(
+          field('三角形', el('span', {}, info.triangles.toLocaleString())),
+          field('元の大きさ', el('span', {}, `${w} × ${h} × ${d}`)),
+        );
+        if (info.animations.length) {
+          container.append(field('アニメ', el('span', { class: 'model-anims' }, info.animations.join('、'))));
+          container.append(el('p', { class: 'note' }, '「▶ 遊ぶ」で、歩く・走る・待機などの名前のアニメーションを自動で使います。'));
+        }
+        container.append(el('p', { class: 'note' }, '取り込んだモデルは形や色を変えられません。位置・回転・大きさを変えたり、部品と組み合わせたりできます。'));
+      }
+    }
+
     // ---- 形状パラメータ
-    if (!isGroup) {
+    if (!isGroup && !isModel) {
       const def = PRIMITIVES[obj.userData.type];
       container.append(el('h3', {}, '形状'));
       for (const p of def.params) {
@@ -617,6 +653,11 @@ export function initProperties(container, editor) {
   editor.addEventListener('selection', render);
   editor.addEventListener('change', render);
   editor.addEventListener('transform', sync);
+  // 取り込んだモデルが読み込めたら情報を出し直す
+  editor.addEventListener('assets', () => {
+    structureKey = '';
+    render();
+  });
   render();
 }
 

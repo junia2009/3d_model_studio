@@ -42,6 +42,7 @@
         <button data-action="new" title="新しい作品を作る（今の作品は自動保存されたまま残ります）">新規</button>
         <button data-action="open" title="JSON ファイルを開く (Ctrl+O)">開く</button>
         <button data-action="save" title="JSON ファイルとして保存 (Ctrl+S)">保存</button>
+        <button data-action="importModel" title="ほかのアプリで作ったモデル（GLB / glTF）を取り込む。3D 画面へのドラッグ＆ドロップでも取り込めます">取り込み</button>
         <details class="menu">
           <summary title="他のソフトで使える形式で書き出す">書き出し ▾</summary>
           <div class="menu-items">
@@ -214,6 +215,7 @@
             <button data-action="open">📂 開く</button>
             <button data-action="save">💾 保存</button>
             <button data-action="sample">🤖 サンプル</button>
+            <button data-action="importModel">📦 モデルを取り込む</button>
           </div>
           <h3>書き出し</h3>
           <div class="menu-grid">
@@ -256,7 +258,7 @@
       </span>
     </footer>
 
-    <input type="file" id="file-input" accept=".json,application/json" hidden />
+    <input type="file" id="file-input" hidden />
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <div id="update-banner" class="update-banner" role="alert" hidden>
       <span>新しいバージョンがあります</span>

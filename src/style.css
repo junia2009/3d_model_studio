@@ -315,6 +315,118 @@ h3 {
   color: var(--accent);
 }
 
+/* 取り込みタブ：部品のボタンの格子ではなく、縦に並べる */
+.palette.palette-extra {
+  display: block;
+}
+
+.palette .import-button {
+  flex-direction: row;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 8px;
+  font-size: 13px;
+  border-style: dashed;
+}
+
+.import-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.25;
+}
+
+.import-label small {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.import-panel .note {
+  margin: 8px 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.import-panel h4 {
+  margin: 12px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.asset-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.asset-list li {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.palette .asset-list .asset-add {
+  flex: 1;
+  min-width: 0;
+  align-items: flex-start;
+  text-align: left;
+  padding: 6px 8px;
+}
+
+.asset-add .asset-name,
+.asset-add small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.asset-add small {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.palette .asset-list .asset-delete {
+  flex: none;
+  justify-content: center;
+  width: 36px;
+  padding: 0;
+  color: var(--muted);
+}
+
+.palette-tabs button.tab-extra:not(.active) {
+  border-style: dashed;
+}
+
+.model-anims {
+  font-size: 11px;
+  word-break: break-all;
+}
+
+/* ファイルを 3D 画面に持ってきたとき */
+#viewport.drop-target::after {
+  content: 'ここにドロップしてモデルを取り込む';
+  position: absolute;
+  inset: 12px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  background: rgb(79 140 255 / 0.12);
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 20;
+}
+
 /* ================================================================ アウトライナー */
 
 .outliner {

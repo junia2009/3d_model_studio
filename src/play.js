@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { clone as cloneWithBones } from 'three/addons/utils/SkeletonUtils.js';
+import { assetAnimations } from './assets.js';
 
 /**
  * 遊ぶモード：作ったモデルを操作して世界を歩き回る。
@@ -8,6 +10,9 @@ import * as THREE from 'three';
  * - 同じ役割で触れ合っている部品はひとかたまり（例：太もも＋足先）として一緒に動く
  * - 左右・前後は位置から判定し、関節の位置は役割ごとに決める（足・腕は上端、頭は下端など）
  * 元のモデルは変えず、複製（アバター）を動かす。
+ *
+ * 取り込んだモデル（GLB など）はひとかたまりとして扱う。中にアニメーションがあれば、
+ * 名前（Idle / Walk / Run / Jump など）から選んで、速さに合わせて切り替えながら再生する。
  */
 
 export const ROLE_OPTIONS = [
@@ -41,6 +46,8 @@ export function guessRole(name = '') {
 /** その部品の役割：自分に付けた役割 → 名前からの推測 → 親の役割 → 体 */
 export function resolveRole(obj, stopAt = null) {
   for (let o = obj; o && o !== stopAt; o = o.parent) {
+    // 取り込んだモデルの中身（スタジオの部品ではない）の名前は見ない
+    if (!o.userData?.kind) continue;
     const role = o.userData?.role || guessRole(o.name);
     if (role) return role;
   }
@@ -48,6 +55,22 @@ export function resolveRole(obj, stopAt = null) {
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
+
+const CLIP_PATTERNS = {
+  idle: /(idle|stand|breath|wait|rest|survey|look|待機|立)/i,
+  walk: /(walk|歩)/i,
+  run: /(run|sprint|jog|gallop|走)/i,
+  jump: /(jump|leap|hop|跳|ジャンプ)/i,
+};
+
+/** アニメーションの名前から、待機・歩く・走る・跳ぶ に使うものを選ぶ */
+export function pickClips(clips) {
+  const found = {};
+  for (const [key, re] of Object.entries(CLIP_PATTERNS)) found[key] = clips.find((c) => re.test(c.name)) ?? null;
+  // 名前で分からないときは、最初のアニメーションを「歩く」に使う
+  if (!found.walk && !found.run) found.walk = clips.find((c) => c !== found.idle && c !== found.jump) ?? null;
+  return found;
+}
 const damp = (current, target, lambda, dt) => THREE.MathUtils.lerp(current, target, 1 - Math.exp(-lambda * dt));
 
 function angleDelta(from, to) {
@@ -205,7 +228,8 @@ export class Player {
     ed.modelRoot.updateMatrixWorld(true);
     const content = new THREE.Group();
     for (const s of this.sources) {
-      const c = s.clone(true);
+      // 骨のある取り込みモデルも正しく複製できるように SkeletonUtils を使う
+      const c = cloneWithBones(s);
       c.visible = true;
       content.add(c);
     }
@@ -219,9 +243,15 @@ export class Player {
 
     // ---- 役割ごとに部品をまとめる
     const items = [];
-    content.traverse((o) => {
-      if (o.isMesh) items.push({ mesh: o, role: resolveRole(o, content), box: new THREE.Box3().setFromObject(o) });
-    });
+    const collect = (o) => {
+      // 取り込んだモデルは中身をばらさず、まるごと 1 つとして動かす
+      if (o.isMesh || o.userData.kind === 'model') {
+        items.push({ mesh: o, role: resolveRole(o, content), box: new THREE.Box3().setFromObject(o) });
+        if (o.userData.kind === 'model') return;
+      }
+      for (const c of o.children) collect(c);
+    };
+    collect(content);
     const bodyBox = new THREE.Box3();
     items.filter((i) => i.role === 'body').forEach((i) => bodyBox.union(i.box));
     if (bodyBox.isEmpty()) bodyBox.copy(box);
@@ -288,6 +318,7 @@ export class Player {
       if (u.role === 'arm') u.phase = u.side === 'L' ? Math.PI : 0;
     }
     this.units = units;
+    this._setupClips(content);
     this.hasLegs = legs.length > 0;
     this.hasWheels = units.some((u) => u.role === 'wheel');
     this.legLength = Math.max(this.height * 0.25, ...legs.map((l) => l.pivot.position.y - box.min.y));
@@ -324,6 +355,52 @@ export class Player {
     };
     this.walkSpeed = Math.max(1.4, this.height * 1.4);
     this.runSpeed = this.walkSpeed * 2.2;
+  }
+
+  /** 取り込んだモデルのアニメーションを準備する */
+  _setupClips(content) {
+    this.mixers = [];
+    content.traverse((o) => {
+      if (o.userData.kind !== 'model') return;
+      const clips = assetAnimations(o.userData.asset);
+      if (!clips.length) return;
+      const mixer = new THREE.AnimationMixer(o);
+      const picked = pickClips(clips);
+      const actions = {};
+      for (const [key, clip] of Object.entries(picked)) {
+        if (!clip) continue;
+        // 同じアニメーションを 2 つの役に使うときは 1 つの動きを共有する
+        const action = mixer.clipAction(clip);
+        action.setEffectiveWeight(0);
+        action.play();
+        actions[key] = action;
+      }
+      this.mixers.push({ mixer, actions });
+    });
+    this.animated = this.mixers.some((m) => m.actions.walk || m.actions.run);
+  }
+
+  _animateClips(dt, walk, runB) {
+    const s = this.state;
+    for (const { mixer, actions } of this.mixers) {
+      const { idle, walk: walkA, run, jump } = actions;
+      const air = jump ? s.air : 0;
+      const ground = 1 - air;
+      const weights = new Map();
+      const add = (action, w) => action && weights.set(action, (weights.get(action) ?? 0) + w);
+      // 待機のアニメーションがなければ、止まっているときは歩く動きをその場で止めておく（timeScale = 0）
+      const move = idle ? walk : 1;
+      const rb = run ? runB : 0;
+      add(idle, (1 - walk) * ground);
+      add(walkA ?? run, move * (1 - rb) * ground);
+      add(run, move * rb * ground);
+      add(jump, air);
+      for (const action of Object.values(actions)) action.setEffectiveWeight(weights.get(action) ?? 0);
+      // 速さに合わせて再生の速さを変える。待機がないときは、止まると歩く動きも止まる
+      if (walkA) walkA.timeScale = idle ? 0.7 + 0.3 * walk + 0.5 * runB : walk + 0.5 * runB;
+      if (run && run !== walkA) run.timeScale = 0.8 + 0.3 * runB;
+      mixer.update(dt);
+    }
   }
 
   // ================================================================ 入力
@@ -524,6 +601,7 @@ export class Player {
     const moving = s.grounded ? walk : 0;
     s.phase += (s.speed * dt) / (this.legLength * 1.1);
     const air = s.air;
+    this._animateClips(dt, walk, runB);
     const q = new THREE.Quaternion();
     const q2 = new THREE.Quaternion();
 
@@ -562,7 +640,10 @@ export class Player {
     const h = this.height;
     let bob;
     let squash = 1;
-    if (this.hasLegs || this.hasWheels) {
+    if (this.animated) {
+      // 歩くアニメーションのあるモデルは、体の弾みもアニメーションに任せる
+      bob = 0;
+    } else if (this.hasLegs || this.hasWheels) {
       bob = this.hasLegs ? Math.abs(Math.sin(s.phase)) * (0.035 * walk + 0.05 * runB) * h * (1 - air) : 0;
       bob += Math.sin(s.t * 2) * 0.006 * h * (1 - walk);
     } else {
@@ -573,7 +654,7 @@ export class Player {
     }
     if (s.landT > 0) squash *= 1 - Math.sin((s.landT / 0.18) * Math.PI) * 0.16;
     if (!s.grounded) squash *= 1 + 0.06 * Math.min(1, Math.abs(s.vy) / 10);
-    const lean = runB * 0.16 + walk * 0.04;
+    const lean = (runB * 0.16 + walk * 0.04) * (this.animated ? 0.3 : 1);
     this.pose.position.y = bob;
     this.pose.quaternion.setFromAxisAngle(A, lean);
     this.pose.scale.set(1 / Math.sqrt(squash), squash, 1 / Math.sqrt(squash));

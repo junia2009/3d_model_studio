@@ -5,12 +5,19 @@ import { initPWA } from './pwa.js';
 import { initProjects } from './projects-ui.js';
 import { validateSceneData } from './serializer.js';
 import { Player } from './play.js';
+import { initModelImport } from './import-ui.js';
+import { collectAssetIds, packAssets, unpackAssets } from './assets.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
 
 const editor = new Editor($('#viewport'));
-initPalette($('#palette'), editor);
+const modelImport = initModelImport(editor, {
+  toast: (...args) => toast(...args),
+  // スマホでは置いたらシートを閉じて、置いたモデルが見えるようにする
+  onPlaced: () => phoneQuery.matches && setSheet(null),
+});
+initPalette($('#palette'), editor, [modelImport.tab]);
 initOutliner($('#outliner'), editor);
 initProperties($('#properties'), editor);
 initWorldPicker($$('[data-world-picker]'), editor);
@@ -85,7 +92,8 @@ compactQuery.addEventListener('change', () => setSheet(null));
 // スマホでは部品を追加したらシートを閉じて、追加した部品が見えるようにする
 $('#palette').addEventListener('click', (e) => {
   // 分類のタブを押したときは閉じない
-  if (phoneQuery.matches && e.target.closest('.palette button')) setSheet(null);
+  // 取り込みタブはファイル選択などがあるので、置いたときに閉じる（onPlaced）
+  if (phoneQuery.matches && e.target.closest('.palette:not(.palette-extra) button')) setSheet(null);
 });
 
 // iOS Safari のピンチでページ全体が拡大されるのを防ぐ（3D 画面のピンチはズームに使う）
@@ -102,12 +110,17 @@ const actions = {
   },
   open: () => $('#file-input').click(),
   save: async () => {
-    const json = JSON.stringify(editor.getSceneData(), null, 2);
+    const data = editor.getSceneData();
+    // 取り込んだモデルは元のファイルごと埋め込み、ほかの端末でも開けるようにする
+    const ids = collectAssetIds(data.objects);
+    if (ids.size) data.assets = await packAssets(ids);
+    const json = JSON.stringify(data, null, ids.size ? 0 : 2);
     const name = `${fileBaseName()}.studio.json`;
     if (await saveFile(new Blob([json], { type: 'application/json' }), name)) {
       toast(`保存しました（${name}）`);
     }
   },
+  importModel: () => modelImport.pick(),
   sample: () => {
     openAsProject(sampleScene(), 'サンプル');
     setSheet(null);
@@ -182,8 +195,19 @@ $('#file-input').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   e.target.value = '';
   if (!file) return;
+  // GLB / glTF なら今の作品にモデルとして取り込む
+  if (/\.(glb|gltf)$/i.test(file.name)) {
+    modelImport.importFiles([file]);
+    return;
+  }
   try {
     const data = validateSceneData(JSON.parse(await file.text()));
+    // 埋め込まれたモデルはこのブラウザの保管庫へ移し、作品のデータからは外す（作品の保存を軽くするため）
+    if (data.assets) {
+      toast('モデルを読み込んでいます…', { duration: 60000 });
+      await unpackAssets(data.assets);
+      delete data.assets;
+    }
     openAsProject(data, file.name.replace(/(\.studio)?\.json$/i, ''));
   } catch (err) {
     console.error(err);
@@ -229,7 +253,7 @@ function updateButtons() {
   // グループ化は押すと選び方を案内するので、部品が 2 つ以上あれば常に押せる
   let parts = 0;
   editor.modelRoot.traverse((o) => {
-    if (o.userData.kind === 'primitive') parts += 1;
+    if (o.userData.kind === 'primitive' || o.userData.kind === 'model') parts += 1;
   });
   setDisabled('group', parts < 2);
   setDisabled('ungroup', !hasGroup);

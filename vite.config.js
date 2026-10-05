@@ -26,7 +26,8 @@ function serviceWorkerPlugin() {
     closeBundle() {
       const files = listFiles(outDir)
         .map((f) => relative(outDir, f).split(sep).join('/'))
-        .filter((f) => f !== 'sw.js' && !f.endsWith('.map'))
+        // Draco（圧縮モデル）の復元プログラムは大きいので、使ったときにだけ取ってきてキャッシュする
+        .filter((f) => f !== 'sw.js' && !f.endsWith('.map') && !/\/draco_/.test(f))
         .sort();
       const hash = createHash('sha256');
       for (const f of files) hash.update(f).update(readFileSync(join(outDir, f)));

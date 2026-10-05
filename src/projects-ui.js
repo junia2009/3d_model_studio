@@ -63,7 +63,12 @@ export function initProjects(editor, { lists, menus, nameLabels, toast }) {
       saveNow();
       render();
     }, 400);
-    // 見本画像は操作が落ち着いてから撮る
+    scheduleThumb();
+  };
+
+  // 見本画像は操作が落ち着いてから撮る
+  const scheduleThumb = () => {
+    if (switching) return;
     clearTimeout(thumbTimer);
     thumbTimer = setTimeout(() => {
       const cur = store.current;
@@ -79,6 +84,8 @@ export function initProjects(editor, { lists, menus, nameLabels, toast }) {
 
   editor.addEventListener('change', scheduleSave);
   editor.addEventListener('world', scheduleSave);
+  // 取り込んだモデルが読み込めたら（中身は変わらないので）見本画像だけ撮り直す
+  editor.addEventListener('assets', scheduleThumb);
   // タブを閉じる・アプリを切り替えるときは、待たずに保存する
   const flush = () => {
     if (saveTimer || thumbTimer) {

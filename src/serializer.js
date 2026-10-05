@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { PRIMITIVES, buildGeometry, defaultParams } from './primitives.js';
+import { createPlaceholder, instantiateAsset, isAssetMissing, loadAsset } from './assets.js';
 
 export const FORMAT = 'three-model-studio';
 export const FORMAT_VERSION = 1;
@@ -68,8 +69,49 @@ export function createGroup(name = 'グループ') {
   return group;
 }
 
+/**
+ * 取り込んだモデル（GLB など）。中身はスタジオの部品ではない（編集できない）ひとかたまりとして扱う。
+ * 中身がまだ読み込まれていなければ仮の箱を置き、読み込めたら差し替える。
+ */
+export function createModel(asset, name = 'モデル') {
+  const group = new THREE.Group();
+  group.name = name;
+  group.userData = { id: newId(), kind: 'model', asset };
+  fillModel(group);
+  return group;
+}
+
+/** モデルの中身（または仮の箱）を入れ直す。中身が入ったら true */
+export function fillModel(group) {
+  const content = instantiateAsset(group.userData.asset);
+  for (const c of [...group.children]) {
+    if (c.userData.assetContent || c.userData.assetPlaceholder) {
+      group.remove(c);
+      if (c.userData.assetPlaceholder) disposeObject(c);
+    }
+  }
+  if (content) {
+    group.add(content);
+    return true;
+  }
+  group.add(createPlaceholder(isAssetMissing(group.userData.asset)));
+  if (!isAssetMissing(group.userData.asset)) loadAsset(group.userData.asset);
+  return false;
+}
+
 export function isStudioObject(obj) {
-  return obj?.userData?.kind === 'primitive' || obj?.userData?.kind === 'group';
+  const kind = obj?.userData?.kind;
+  return kind === 'primitive' || kind === 'group' || kind === 'model';
+}
+
+/** 3D 画面で当たった物から、それを含むスタジオの部品（取り込みモデルの中身ならモデル）を探す */
+export function studioOwner(obj) {
+  let found = null;
+  for (let o = obj; o; o = o.parent) {
+    if (o.userData?.kind === 'model') return o;
+    if (!found && isStudioObject(o)) found = o;
+  }
+  return found;
 }
 
 // ---- シリアライズ ----
@@ -91,6 +133,7 @@ export function serializeObject(obj) {
     node.params = { ...obj.userData.params };
     node.material = readMaterialProps(obj.material);
   }
+  if (obj.userData.kind === 'model') node.asset = obj.userData.asset;
   // 遊ぶモードでの役割（足・腕など）。自動のときは保存しない
   if (obj.userData.role) node.role = obj.userData.role;
   const children = obj.children.filter(isStudioObject);
@@ -102,6 +145,8 @@ export function deserializeObject(node) {
   let obj;
   if (node.kind === 'group') {
     obj = createGroup(node.name);
+  } else if (node.kind === 'model') {
+    obj = createModel(node.asset, node.name);
   } else {
     if (!PRIMITIVES[node.type]) throw new Error(`未知の部品タイプです: ${node.type}`);
     obj = createPrimitive(node.type, { params: node.params, material: node.material, name: node.name });
@@ -134,11 +179,17 @@ export function validateSceneData(data) {
 /** オブジェクト（と子孫）が持つ GPU リソースを解放する */
 export function disposeObject(obj) {
   obj.traverse((o) => {
-    if (o.isMesh) {
+    // 取り込んだモデルの形・色は、ほかの複製と共有しているので解放しない
+    if (o.isMesh && !isSharedAsset(o)) {
       o.geometry.dispose();
       o.material.dispose();
     }
   });
+}
+
+function isSharedAsset(obj) {
+  for (let o = obj; o; o = o.parent) if (o.userData?.assetContent) return true;
+  return false;
 }
 
 /** 複製時に新しい ID を振り直す */

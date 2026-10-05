@@ -12,14 +12,19 @@ import { History } from './history.js';
 import {
   applyMaterialProps,
   createGroup,
+  createModel,
   createPrimitive,
   deserializeObject,
   disposeObject,
+  fillModel,
   isStudioObject,
   reassignIds,
+  serializeObject,
   serializeScene,
+  studioOwner,
   validateSceneData,
 } from './serializer.js';
+import { assetEvents, instantiateAsset } from './assets.js';
 
 
 /** 「作業用ライト」：世界の光に関係なく、部品の色がそのまま見える明かり */
@@ -38,6 +43,7 @@ export const SNAP = {
  *   - 'change'       : シーン構成やプロパティが変わった（アウトライナー・パネル再描画用）
  *   - 'transform'    : ギズモでドラッグ中（数値表示の更新用）
  *   - 'history'      : Undo / Redo の可否が変わった
+ *   - 'assets'       : 取り込んだモデルの中身が読み込まれた（見た目だけが変わる）
  *   - 'mode'         : 変形モード・座標系・スナップが変わった
  */
 export class Editor extends EventTarget {
@@ -60,6 +66,8 @@ export class Editor extends EventTarget {
     this.setWorld(DEFAULT_WORLD);
     this._initControls();
     this._initPicking();
+    // 取り込んだモデルが読み込めたら、仮の箱を中身に差し替える
+    assetEvents.addEventListener('ready', (e) => this._onAssetReady(e.detail.id));
     this._initObjectDrag();
 
     this._resizeObserver = new ResizeObserver(() => this._resize());
@@ -263,11 +271,11 @@ export class Editor extends EventTarget {
 
         const hit = raycaster
           .intersectObject(this.modelRoot, true)
-          .find((h) => isStudioObject(h.object) && this._isVisibleInTree(h.object));
+          .find((h) => studioOwner(h.object) && this._isVisibleInTree(h.object));
         if (!hit) return;
         const targets = this._topMostSelected();
         const grabbed = targets.some((t) => {
-          for (let o = hit.object; o; o = o.parent) if (o === t) return true;
+          for (let o = studioOwner(hit.object); o; o = o.parent) if (o === t) return true;
           return false;
         });
         if (!grabbed) return;
@@ -440,8 +448,9 @@ export class Editor extends EventTarget {
     pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(pointer, this.camera);
     const hits = raycaster.intersectObject(this.modelRoot, true);
-    const hit = hits.find((h) => isStudioObject(h.object) && this._isVisibleInTree(h.object));
-    return hit?.object ?? null;
+    const hit = hits.find((h) => studioOwner(h.object) && this._isVisibleInTree(h.object));
+    // 取り込んだモデルの中身に当たったときは、モデル全体を選ぶ
+    return hit ? studioOwner(hit.object) : null;
   }
 
   _isVisibleInTree(obj) {
@@ -672,6 +681,46 @@ export class Editor extends EventTarget {
     return mesh;
   }
 
+  /** 取り込んだモデルを置く。大きすぎる・小さすぎるモデルは扱いやすい大きさ（約 2）に合わせる */
+  addModel(asset, name, info) {
+    const count = this._countModels(asset) + 1;
+    const model = createModel(asset, count > 1 ? `${name} ${count}` : name);
+    const size = Math.max(...(info?.size ?? [1, 1, 1]));
+    let fitted = false;
+    if (size > 10 || size < 0.1) {
+      const k = 2 / size;
+      model.scale.setScalar(Number(k.toPrecision(3)));
+      fitted = true;
+    }
+    this.modelRoot.add(model);
+    const t = this.orbit.target;
+    const step = SNAP.translate;
+    model.position.set(Math.round(t.x / step) * step, 0, Math.round(t.z / step) * step);
+    this._placeOnGround(model);
+    this.select([model]);
+    this.commit();
+    return { model, fitted };
+  }
+
+  _countModels(asset) {
+    let n = 0;
+    this.modelRoot.traverse((o) => {
+      if (o.userData.kind === 'model' && o.userData.asset === asset) n += 1;
+    });
+    return n;
+  }
+
+  _onAssetReady(id) {
+    const models = [];
+    this.modelRoot.traverse((o) => {
+      if (o.userData.kind === 'model' && o.userData.asset === id) models.push(o);
+    });
+    if (!models.length) return;
+    models.forEach(fillModel);
+    this._refreshSelectionVisuals();
+    this.dispatchEvent(new Event('assets'));
+  }
+
   _countByType(type) {
     let n = 0;
     this.modelRoot.traverse((o) => {
@@ -744,15 +793,8 @@ export class Editor extends EventTarget {
   }
 
   _cloneObject(obj) {
-    const copy = obj.clone(true);
-    // clone はジオメトリ・マテリアルを共有するので、編集が波及しないよう複製する
-    copy.traverse((o) => {
-      if (o.isMesh) {
-        o.geometry = o.geometry.clone();
-        o.material = o.material.clone();
-      }
-      if (isStudioObject(o)) o.userData = structuredClone(o.userData);
-    });
+    // 保存データを経由して作り直す（形・色を共有しない。取り込んだモデルの骨も正しく複製される）
+    const copy = deserializeObject(serializeObject(obj));
     reassignIds(copy);
     return copy;
   }
@@ -997,7 +1039,16 @@ export class Editor extends EventTarget {
     const copy = (src, dst) => {
       for (const child of src.children) {
         if (!isStudioObject(child) || !child.visible) continue;
-        const c = child.isMesh ? new THREE.Mesh(child.geometry, child.material) : new THREE.Group();
+        let c;
+        if (child.userData.kind === 'model') {
+          // 読み込めていないモデルは書き出さない
+          const content = instantiateAsset(child.userData.asset);
+          if (!content) continue;
+          c = new THREE.Group();
+          c.add(content);
+        } else {
+          c = child.isMesh ? new THREE.Mesh(child.geometry, child.material) : new THREE.Group();
+        }
         c.name = child.name;
         c.position.copy(child.position);
         c.quaternion.copy(child.quaternion);
